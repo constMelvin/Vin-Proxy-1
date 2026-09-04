@@ -113,7 +113,11 @@ PlayerTracker::PlayerInfo PlayerTracker::get_local_player() const {
     
     auto it = players_.find(local_player_netid_);
     if (it != players_.end()) {
-        return it->second;
+        auto info = it->second;
+        if (info.cloth_hand == 0 && clothing_.hand > 0) {
+            info.cloth_hand = static_cast<uint32_t>(clothing_.hand);
+        }
+        return info;
     }
     
     return PlayerInfo{};

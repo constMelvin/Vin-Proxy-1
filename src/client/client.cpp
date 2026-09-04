@@ -439,6 +439,55 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
             }
         }
 
+        // -------------------------------------------------------------
+        // VISUAL WEAPON PUNCH FIX
+        // -------------------------------------------------------------
+        if (game_update_packet.type == packet::PACKET_STATE || 
+            game_update_packet.type == packet::PACKET_TILE_APPLY_DAMAGE ||
+            game_update_packet.type == packet::PACKET_TILE_CHANGE_REQUEST ||
+            game_update_packet.type == packet::PACKET_ITEM_ACTIVATE_OBJECT_REQUEST) 
+        {
+            auto local_player = utils::PlayerTracker::get_instance().get_local_player();
+            
+            // Check if this punch packet belongs to the local player
+            if (local_player.netID > 0 && game_update_packet.net_id == local_player.netID) {
+                // Get the current visual hand item (stored in PlayerTracker or clothing slots)
+                uint32_t visual_hand_id = local_player.cloth_hand; 
+                if (visual_hand_id == 0) {
+                    visual_hand_id = static_cast<uint32_t>(utils::PlayerTracker::get_instance().get_clothing().hand);
+                }
+                
+                if (visual_hand_id > 0) {
+                    auto& anim_mgr = utils::WeaponAnimationManager::get_instance();
+                    auto prof = anim_mgr.get_profile(visual_hand_id);
+
+                    // Overwrite the raw packet data inside byte_stream going to the local client
+                    auto& raw = const_cast<std::vector<std::byte>&>(byte_stream.get_data());
+                    if (raw.size() >= 4 + sizeof(packet::TankUpdatePacket)) {
+                        packet::TankUpdatePacket* tank = reinterpret_cast<packet::TankUpdatePacket*>(raw.data() + 4);
+
+                        // 1. Set weapon ID so the client renders the sword swing instead of a fist
+                        tank->int_data = (prof.anim_item_id != 0) ? prof.anim_item_id : visual_hand_id;
+                        
+                        // 2. Remove the forced fist animation type and flags for melee weapons
+                        if (prof.type == utils::WeaponType::SWORD || prof.type == utils::WeaponType::TOOL) {
+                            tank->animation_type = 0;
+                        } else {
+                            tank->animation_type = prof.anim_type;
+                            tank->flags |= (packet::PACKET_FLAG_ON_PUNCHED | packet::PACKET_FLAG_ON_TILE_ACTION);
+                        }
+
+                        // Trigger accompanying visual sounds and projectile/slash particles
+                        const packet::TankUpdatePacket* tank_view = reinterpret_cast<const packet::TankUpdatePacket*>(raw.data() + 4);
+                        anim_mgr.play_weapon_effects(core_, visual_hand_id, local_player.netID, tank_view);
+
+                        spdlog::info("\033[36m[VISUAL WEAPON PUNCH HOOK]\033[0m Overwrote incoming server punch packet for netID {}: hand_id={}, anim_type={}, int_data={}\033[0m",
+                                     local_player.netID, visual_hand_id, static_cast<int>(tank->animation_type), tank->int_data);
+                    }
+                }
+            }
+        }
+
         if (game_update_packet.type == packet::PACKET_ITEM_CHANGE_OBJECT) {
             const auto& raw = byte_stream.get_data();
             if (raw.size() >= 4 + 32) {

@@ -316,8 +316,12 @@ private:
             uint32_t hand_id = static_cast<uint32_t>(hand_it->second);
             if (is_punch_action(tank)) {
                 modified_tank.int_data = hand_id;
-                uint8_t anim = utils::WeaponAnimationManager::get_instance().get_anim_type(hand_id);
-                modified_tank.animation_type = (anim > 0) ? anim : 3;
+                auto prof = utils::WeaponAnimationManager::get_instance().get_profile(hand_id);
+                if (prof.type == utils::WeaponType::SWORD || prof.type == utils::WeaponType::TOOL) {
+                    modified_tank.animation_type = 0;
+                } else {
+                    modified_tank.animation_type = (prof.anim_type > 0) ? prof.anim_type : 3;
+                }
                 needs_modification = true;
                 spdlog::info("[PUNCH ANIMATION] Server punch echo -> hand item: {}, anim_type: {}", hand_id, static_cast<int>(modified_tank.animation_type));
             }

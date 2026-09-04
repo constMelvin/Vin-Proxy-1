@@ -396,20 +396,23 @@ public:
             visual_punch.type = static_cast<uint8_t>(packet::PACKET_STATE);
             visual_punch.net_id = static_cast<int32_t>(net_id);
 
-            // Preserve movement / facing flags, and ensure authentic punch action flags
-            visual_punch.flags = (tank->flags & (packet::PACKET_FLAG_ROTATE_LEFT | packet::PACKET_FLAG_ON_SOLID | packet::PACKET_FLAG_ON_JUMP))
-                               | packet::PACKET_FLAG_ON_PUNCHED | packet::PACKET_FLAG_ON_TILE_ACTION;
+            // Keep direction and movement without forcing extended fist punch flags for melee
+            visual_punch.flags = (tank->flags & (packet::PACKET_FLAG_ROTATE_LEFT | packet::PACKET_FLAG_ON_SOLID | packet::PACKET_FLAG_ON_JUMP));
 
             auto captured = get_captured_profile(hand_id);
             if (captured && captured->is_valid) {
                 // Exact 1:1 replica of authentic punch captured from real item!
                 visual_punch.animation_type = captured->animation_type;
                 visual_punch.int_data = captured->int_data;
-                visual_punch.flags |= (captured->flags & (packet::PACKET_FLAG_ON_PUNCHED | packet::PACKET_FLAG_ON_TILE_ACTION));
+                visual_punch.flags |= captured->flags;
             } else {
-                visual_punch.animation_type = (prof.anim_type > 0) ? prof.anim_type : 3;
                 visual_punch.int_data = (prof.anim_item_id != 0) ? prof.anim_item_id : hand_id;
-                visual_punch.flags |= 0xA20;
+                if (prof.type == WeaponType::SWORD || prof.type == WeaponType::TOOL) {
+                    visual_punch.animation_type = 0;
+                } else {
+                    visual_punch.animation_type = prof.anim_type;
+                    visual_punch.flags |= (packet::PACKET_FLAG_ON_PUNCHED | packet::PACKET_FLAG_ON_TILE_ACTION);
+                }
             }
 
             ByteStream<std::uint16_t> bs{};

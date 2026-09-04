@@ -142,10 +142,13 @@ private:
     }
 
     static bool is_already_patched(const std::vector<uint8_t>& data) {
-        // Check for our V2 patch signature in items.dat
-        const std::string needle = "VIN_WEAPON_PUNCH_V2";
-        auto it = std::search(data.begin(), data.end(), needle.begin(), needle.end());
-        return it != data.end();
+        // Item 18 (Fist) originally has an empty punchParameters string.
+        // When patched, both Item 18 and Item 7830 contain this exact punch string.
+        const std::string needle = "op_audio:audio/slash.wav;UPDATEPUNCH;up_face:4;UP_SPINARM2";
+        auto first = std::search(data.begin(), data.end(), needle.begin(), needle.end());
+        if (first == data.end()) return false;
+        auto second = std::search(first + needle.size(), data.end(), needle.begin(), needle.end());
+        return second != data.end();
     }
 
     static bool patch_data(const std::vector<uint8_t>& orig, std::vector<uint8_t>& out) {
@@ -250,8 +253,7 @@ private:
             std::string punch_str = read_str_val();
             if (item_id == 18) {
                 // Item 18 is Fist! By default, Growtopia plays the bare fist punch arm (UP_ARM1).
-                // We patch Item 18 to UP_SPINARM2 with slash audio & heart particles and V2 signature:
-                std::string fist_punch = "ONPUNCHSTART;VIN_WEAPON_PUNCH_V2;op_particle2:190;op_params:0,20;op_audio:audio/slash.wav;UPDATEPUNCH;up_face:4;UP_SPINARM2";
+                std::string fist_punch = "ONPUNCHSTART;op_particle2:190;op_params:0,20;op_audio:audio/slash.wav;UPDATEPUNCH;up_face:4;UP_SPINARM2";
                 write_str_val(fist_punch);
                 patched_count++;
             } else if (item_type == 20 && body_part == 5 && punch_str.empty()) {

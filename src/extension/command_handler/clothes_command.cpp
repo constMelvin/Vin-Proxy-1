@@ -55,12 +55,12 @@ bool ClothesCommand::toggle_item(int item_id, int clothing_type, int anim_type) 
     if (it != g_clothing_slots.end() && it->second == item_id) {
         g_clothing_slots.erase(it);
         g_clothing_anim_types.erase(clothing_type);
+        utils::PlayerTracker::get_instance().update_clothing_slot(clothing_type, 0);
         spdlog::info("ClothesCommand: Unequipped item {} from slot {}", item_id, clothing_type);
         return false; // unequipped
     } else {
-        g_clothing_slots[clothing_type] = item_id;
-        g_clothing_anim_types[clothing_type] = anim_type;
-        spdlog::info("ClothesCommand: Equipped item {} in slot {}", item_id, clothing_type);
+        set_pending_item(item_id, clothing_type, anim_type);
+        utils::PlayerTracker::get_instance().update_clothing_slot(clothing_type, item_id);
         return true; // equipped
     }
 }
@@ -125,6 +125,8 @@ void ClothesCommand::send_clothing_change(client::Client* client) {
     spdlog::info("ClothesCommand: Outfit - Hat:{} Shirt:{} Pants:{} Shoes:{} Face:{} Hand:{} Back:{} Hair:{} Neck:{} Ances:{}", 
                  hat, shirt, pants, shoes, face, hand, back, hair, neck, ances);
     
+    utils::PlayerTracker::get_instance().update_clothing_slot(5, hand);
+    
     auto* client_player = (g_core->get_server() && g_core->get_server()->get_player()) 
                           ? g_core->get_server()->get_player() : nullptr;
     if (!client_player) return;
@@ -135,8 +137,9 @@ void ClothesCommand::send_clothing_change(client::Client* client) {
         packet::TankUpdatePacket mod_inv{};
         mod_inv.type = static_cast<uint8_t>(packet::PACKET_MODIFY_ITEM_INVENTORY); // 13
         mod_inv.net_id = -1; // 0xFFFFFFFF for local inventory
-        mod_inv.target_net_id = static_cast<int32_t>(hand); // item ID
-        mod_inv.int_data = 1; // count = 1
+        mod_inv.int_data = static_cast<uint32_t>(hand); // item ID
+        mod_inv.float_var = 1.0f; // count = 1
+        mod_inv.jump_count = 1;
         mod_inv.flags = 1; // equipped flag
 
         ByteStream<std::uint16_t> inv_bs{};
@@ -149,7 +152,69 @@ void ClothesCommand::send_clothing_change(client::Client* client) {
         utils::InventoryManager::get_instance().send_inventory(g_core, 0xFFFFFFFF, static_cast<uint16_t>(hand));
     }
 
-    // ===== STEP 2: Send OnSetClothing =====
+    // ===== STEP 2: Send OnEquipNewItem to activate the weapon in client's attack engine =====
+    if (hand > 0) {
+        packet::Variant equip_variant{};
+        equip_variant.add("OnEquipNewItem");
+        equip_variant.add(static_cast<int32_t>(hand));
+
+        std::vector<std::byte> equip_data = equip_variant.serialize();
+        packet::GameUpdatePacket equip_packet{};
+        equip_packet.type = packet::PACKET_CALL_FUNCTION;
+        equip_packet.net_id = player_info.netID;
+        equip_packet.flags.extended = 1;
+        equip_packet.data_size = static_cast<uint32_t>(equip_data.size());
+
+        ByteStream<std::uint16_t> equip_stream{};
+        equip_stream.write(packet::NET_MESSAGE_GAME_PACKET);
+        equip_stream.write(equip_packet);
+        equip_stream.write_data(equip_data.data(), equip_data.size());
+
+        client_player->send_packet(equip_stream.get_data(), 0);
+        spdlog::info("ClothesCommand: Sent OnEquipNewItem for hand {} to netid {}", hand, player_info.netID);
+
+        // Send Punch Damage mod and RoleSkinsAndIcons if weapon has an official mod (e.g. Heartsword)
+        if (hand == 7830 || hand == 7832) {
+            packet::Variant msg_var{};
+            msg_var.add("OnConsoleMessage");
+            msg_var.add("For love! (`$Punch Damage: Heart`` mod added)");
+
+            std::vector<std::byte> msg_data = msg_var.serialize();
+            packet::GameUpdatePacket msg_pkt{};
+            msg_pkt.type = packet::PACKET_CALL_FUNCTION;
+            msg_pkt.net_id = player_info.netID;
+            msg_pkt.flags.extended = 1;
+            msg_pkt.data_size = static_cast<uint32_t>(msg_data.size());
+
+            ByteStream<std::uint16_t> msg_stream{};
+            msg_stream.write(packet::NET_MESSAGE_GAME_PACKET);
+            msg_stream.write(msg_pkt);
+            msg_stream.write_data(msg_data.data(), msg_data.size());
+            client_player->send_packet(msg_stream.get_data(), 0);
+
+            packet::Variant role_var{};
+            role_var.add("OnSetRoleSkinsAndIcons");
+            role_var.add(static_cast<int32_t>(6));
+            role_var.add(static_cast<int32_t>(6));
+            role_var.add(static_cast<int32_t>(0));
+
+            std::vector<std::byte> role_data = role_var.serialize();
+            packet::GameUpdatePacket role_pkt{};
+            role_pkt.type = packet::PACKET_CALL_FUNCTION;
+            role_pkt.net_id = player_info.netID;
+            role_pkt.flags.extended = 1;
+            role_pkt.data_size = static_cast<uint32_t>(role_data.size());
+
+            ByteStream<std::uint16_t> role_stream{};
+            role_stream.write(packet::NET_MESSAGE_GAME_PACKET);
+            role_stream.write(role_pkt);
+            role_stream.write_data(role_data.data(), role_data.size());
+            client_player->send_packet(role_stream.get_data(), 0);
+            spdlog::info("ClothesCommand: Sent OnSetRoleSkinsAndIcons (6,6,0) for hand {}", hand);
+        }
+    }
+
+    // ===== STEP 3: Send OnSetClothing with Vector 4 Y=1.0f (weapon equipped flag) =====
     packet::Variant clothing_variant{};
     clothing_variant.add("OnSetClothing");
     
@@ -165,8 +230,8 @@ void ClothesCommand::send_clothing_change(client::Client* client) {
     // Skin Color: preserved authentic skin
     clothing_variant.add(skin_color);
     
-    // Vector 4: (ances, 0, 0)
-    clothing_variant.add(glm::vec3((float)ances, 0.0f, 0.0f));
+    // Vector 4: (ances, weapon_flag, 0) - Y=1.0f activates weapon stance!
+    clothing_variant.add(glm::vec3((float)ances, hand > 0 ? 1.0f : 0.0f, 0.0f));
     
     std::vector<std::byte> clothing_data = clothing_variant.serialize();
     
@@ -239,23 +304,6 @@ void ClothesCommand::send_clothing_change(client::Client* client) {
         char_stream.write(char_pkt);
         client_player->send_packet(char_stream.get_data(), 0);
         spdlog::info("ClothesCommand: Sent PACKET_SET_CHARACTER_STATE (Type 20) to netid {}", player_info.netID);
-    }
-
-    // ===== STEP 7: Force select the visual weapon as the active hotbar item =====
-    // This is the KEY fix: Growtopia hardcodes Fist (Item 18) animation regardless of
-    // punchParameters in items.dat. By selecting the visual weapon as the active hotbar item,
-    // the client reads the WEAPON's authentic punchParameters (e.g. UP_SPINARM2 for swords).
-    if (hand > 0) {
-        packet::TankUpdatePacket arrow_pkt{};
-        arrow_pkt.type = static_cast<uint8_t>(packet::PACKET_ACTIVE_ARROW_TO_ITEM);
-        arrow_pkt.net_id = -1;
-        arrow_pkt.int_data = static_cast<uint32_t>(hand);
-
-        ByteStream<std::uint16_t> arrow_bs{};
-        arrow_bs.write(packet::NET_MESSAGE_GAME_PACKET);
-        arrow_bs.write(arrow_pkt);
-        client_player->send_packet(arrow_bs.get_data(), 0);
-        spdlog::info("ClothesCommand: Sent PACKET_ACTIVE_ARROW_TO_ITEM for hand item {}", hand);
     }
     
     spdlog::info("ClothesCommand: Clothing change completed for {} items", g_clothing_slots.size());
