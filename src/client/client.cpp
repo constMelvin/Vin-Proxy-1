@@ -28,6 +28,7 @@
 #include "../utils/weapon_animation_manager.hpp"
 #include "../utils/world_manager.hpp"
 #include "../utils/world_info.h"
+#include "../utils/visual_items_manager.hpp"
 #include <cmath>
 
 namespace client {
@@ -376,16 +377,12 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
         packet::GameUpdatePacket game_update_packet{};
         if (!byte_stream.read(game_update_packet)) {
             spdlog::warn("Failed to read game update packet header");
-            
             return;
         }
 
         std::vector<std::byte> ext_data{};
         const std::size_t remaining_bytes = byte_stream.get_size() - byte_stream.get_read_offset();
 
-        
-        
-        
         if (game_update_packet.type == packet::PACKET_SEND_MAP_DATA) {
             if (remaining_bytes > 0 &&
                 game_update_packet.data_size > 0 &&
@@ -407,28 +404,18 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
             game_update_packet.data_size = static_cast<uint32_t>(ext_data.size());
         } else {
             if (game_update_packet.data_size > 0) {
-                
-                
                 if (game_update_packet.data_size < 256 * 1024 * 1024) { 
                     if (!byte_stream.read_vector(ext_data, static_cast<std::size_t>(game_update_packet.data_size))) {
                         spdlog::warn("Failed to read extended data for game packet, expected: {}, available: {}", 
-                                    game_update_packet.data_size, 
-                                    byte_stream.get_size() - byte_stream.get_read_offset());
-                        
+                                     game_update_packet.data_size, 
+                                     byte_stream.get_size() - byte_stream.get_read_offset());
                     }
                 } else {
                     spdlog::warn("Extended data too large (>{}): {}", 256 * 1024 * 1024, game_update_packet.data_size);
-                    
                 }
             }
         }
 
-        
-        
-        
-        
-        
-        
         if (game_update_packet.type == packet::PACKET_SET_CHARACTER_STATE) {
             const auto& raw = byte_stream.get_data();
             if (raw.size() >= 4 + sizeof(packet::TankUpdatePacket)) {
@@ -436,53 +423,40 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                 utils::WeaponAnimationManager::get_instance().set_server_character_state(tank);
                 spdlog::info("\033[31m[OFFICIAL PACKET_SET_CHARACTER_STATE (TYPE 20)]\033[0m net_id={}, flags=0x{:X}, int_data={}, float_var={}",
                              tank->net_id, tank->flags, tank->int_data, tank->float_var);
+
+                auto local_player = utils::PlayerTracker::get_instance().get_local_player();
+                if (local_player.netID > 0 && tank->net_id == static_cast<int32_t>(local_player.netID)) {
+                    if (utils::VisualItemsManager::get_instance().is_enabled() && 
+                        utils::VisualItemsManager::get_instance().has_any_visual_equipped()) {
+                        packet::TankUpdatePacket patched_tank = *tank;
+                        utils::VisualItemsManager::get_instance().patch_server_character_state(&patched_tank);
+
+                        ByteStream<std::uint16_t> new_bs{};
+                        new_bs.write(packet::NET_MESSAGE_GAME_PACKET);
+                        new_bs.write(patched_tank);
+                        byte_stream = std::move(new_bs);
+                        spdlog::info("[VisualItemsManager] Patched incoming server character state with visual punch effect {} & double jump",
+                                     (int)patched_tank.object_type);
+                    }
+                }
             }
         }
 
-        // -------------------------------------------------------------
-        // VISUAL WEAPON PUNCH FIX
-        // -------------------------------------------------------------
+        // =========================================================================
+        // REAL PUNCH CAPTURE FOR AUTHENTIC WEAPON ANIMATIONS
+        // =========================================================================
         if (game_update_packet.type == packet::PACKET_STATE || 
-            game_update_packet.type == packet::PACKET_TILE_APPLY_DAMAGE ||
-            game_update_packet.type == packet::PACKET_TILE_CHANGE_REQUEST ||
-            game_update_packet.type == packet::PACKET_ITEM_ACTIVATE_OBJECT_REQUEST) 
+            game_update_packet.type == packet::PACKET_TILE_PUNCH) 
         {
             auto local_player = utils::PlayerTracker::get_instance().get_local_player();
-            
-            // Check if this punch packet belongs to the local player
             if (local_player.netID > 0 && game_update_packet.net_id == local_player.netID) {
-                // Get the current visual hand item (stored in PlayerTracker or clothing slots)
-                uint32_t visual_hand_id = local_player.cloth_hand; 
-                if (visual_hand_id == 0) {
-                    visual_hand_id = static_cast<uint32_t>(utils::PlayerTracker::get_instance().get_clothing().hand);
-                }
-                
-                if (visual_hand_id > 0) {
-                    auto& anim_mgr = utils::WeaponAnimationManager::get_instance();
-                    auto prof = anim_mgr.get_profile(visual_hand_id);
-
-                    // Overwrite the raw packet data inside byte_stream going to the local client
-                    auto& raw = const_cast<std::vector<std::byte>&>(byte_stream.get_data());
-                    if (raw.size() >= 4 + sizeof(packet::TankUpdatePacket)) {
-                        packet::TankUpdatePacket* tank = reinterpret_cast<packet::TankUpdatePacket*>(raw.data() + 4);
-
-                        // 1. Set weapon ID so the client renders the sword swing instead of a fist
-                        tank->int_data = (prof.anim_item_id != 0) ? prof.anim_item_id : visual_hand_id;
-                        
-                        // 2. Remove the forced fist animation type and flags for melee weapons
-                        if (prof.type == utils::WeaponType::SWORD || prof.type == utils::WeaponType::TOOL) {
-                            tank->animation_type = 0;
-                        } else {
-                            tank->animation_type = prof.anim_type;
-                            tank->flags |= (packet::PACKET_FLAG_ON_PUNCHED | packet::PACKET_FLAG_ON_TILE_ACTION);
-                        }
-
-                        // Trigger accompanying visual sounds and projectile/slash particles
-                        const packet::TankUpdatePacket* tank_view = reinterpret_cast<const packet::TankUpdatePacket*>(raw.data() + 4);
-                        anim_mgr.play_weapon_effects(core_, visual_hand_id, local_player.netID, tank_view);
-
-                        spdlog::info("\033[36m[VISUAL WEAPON PUNCH HOOK]\033[0m Overwrote incoming server punch packet for netID {}: hand_id={}, anim_type={}, int_data={}\033[0m",
-                                     local_player.netID, visual_hand_id, static_cast<int>(tank->animation_type), tank->int_data);
+                auto clothing = utils::PlayerTracker::get_instance().get_clothing();
+                uint32_t real_hand = static_cast<uint32_t>(clothing.hand);
+                const auto& raw = byte_stream.get_data();
+                if (raw.size() >= 4 + sizeof(packet::TankUpdatePacket)) {
+                    const packet::TankUpdatePacket* tank = reinterpret_cast<const packet::TankUpdatePacket*>(raw.data() + 4);
+                    if (real_hand > 0 && (tank->flags & (packet::PACKET_FLAG_ON_PUNCHED | 0x800)) != 0) {
+                        utils::WeaponAnimationManager::get_instance().capture_real_punch(real_hand, tank);
                     }
                 }
             }
@@ -492,13 +466,13 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
             const auto& raw = byte_stream.get_data();
             if (raw.size() >= 4 + 32) {
                 const uint8_t* b = reinterpret_cast<const uint8_t*>(raw.data()) + 4;
-                uint8_t  obj_type      = b[1];
-                uint8_t  jump_count    = b[2];
-                uint32_t pkt_net_id    = 0;
-                float    float_var     = 0.f;
-                uint32_t pkt_value     = 0;
-                float    vec_x         = 0.f;
-                float    vec_y         = 0.f;
+                uint8_t  obj_type   = b[1];
+                uint8_t  jump_count = b[2];
+                uint32_t pkt_net_id = 0;
+                float    float_var  = 0.f;
+                uint32_t pkt_value  = 0;
+                float    vec_x      = 0.f;
+                float    vec_y      = 0.f;
                 memcpy(&pkt_net_id, b + 4,  4);
                 memcpy(&float_var,  b + 16, 4);
                 memcpy(&pkt_value,  b + 20, 4);
@@ -508,8 +482,6 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                 auto& wm = utils::WorldManager::get_instance();
 
                 if (pkt_net_id == 0xFFFFFFFF) {
-                    
-                    
                     uint32_t new_uid = 1;
                     {
                         const auto& live  = wm.get_live_objects();
@@ -528,11 +500,7 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                     spdlog::info("[ITEM_DROP] id={} uid={} x={:.0f} y={:.0f} count={}",
                                  di.ItemId, di.Uid, di.X, di.Y, di.Amount);
 
-                } else if (pkt_net_id == 0xFFFFFFFC) {
-                    
-
-                } else if (pkt_net_id > 0) {
-                    
+                } else if (pkt_net_id > 0 && pkt_net_id != 0xFFFFFFFC) {
                     wm.remove_dropped_item_by_uid(pkt_value);
                     wm.remove_live_object(pkt_value);
                     spdlog::info("[ITEM_COLLECT] uid={} by net_id={}", pkt_value, pkt_net_id);
@@ -540,22 +508,17 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
             }
         }
 
-        
         if (game_update_packet.type == packet::PACKET_CALL_FUNCTION && !ext_data.empty()) {
             try {
-                
                 packet::Variant variant{};
                 if (variant.deserialize(ext_data)) {
                     auto variants = variant.get_variants();
                     if (variants.size() >= 2) {
                         const std::string function_name = variant.get<std::string>(0);
 
-                        
                         if (function_name == "OnSpawn") {
-                            
                             std::string spawn_data = variant.get<std::string>(1);
                             TextParse text_parse{ spawn_data };
-                            
                             
                             std::string player_name = text_parse.get("name");
                             uint32_t net_id = 0;
@@ -565,13 +528,9 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                 if (!net_id_str.empty()) {
                                     net_id = std::stoul(net_id_str);
                                 }
-                            } catch (...) {
-                                
-                            }
+                            } catch (...) {}
                             
                             if (!player_name.empty() && net_id > 0) {
-                                
-                                
                                 player_name.erase(std::remove(player_name.begin(), player_name.end(), '\''), player_name.end());
                                 player_name.erase(std::remove(player_name.begin(), player_name.end(), '"'), player_name.end());
                                 
@@ -589,7 +548,6 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                 player_name.erase(player_name.find_last_not_of(" \t\r\n") + 1);
                                 
                                 if (!player_name.empty()) {
-                                    
                                     utils::PlayerTracker::get_instance().update_player_name(net_id, player_name);
                                     if (!spawn_platform_id.empty()) {
                                         utils::PlayerTracker::get_instance().update_platform_info(net_id, spawn_platform_id);
@@ -598,38 +556,55 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                 }
                             }
                             
-                            
                             std::string spawn_type = text_parse.get("type");
                             if (spawn_type != "local") {
-                                
                                 player_name = text_parse.get("name");
-                                
-                                
                                 player_name.erase(std::remove(player_name.begin(), player_name.end(), '\''), player_name.end());
                                 player_name.erase(std::remove(player_name.begin(), player_name.end(), '"'), player_name.end());
                                 
-                                spdlog::info("[CLIENT-SPAWN] Got player_name from spawn: '{}' ({} bytes)", 
-                                            player_name, player_name.length());
                                 if (!player_name.empty() && core_->get_server() && core_->get_server()->get_player()) {
-                                    spdlog::info("[CLIENT-SPAWN] Calling JoinCommand::handle_spawn_packet with name: '{}'", 
-                                               player_name);
-                                    command::JoinCommand::handle_spawn_packet(
-                                        core_->get_server()->get_player(),
-                                        player_name
-                                    );
-                                    
-                                    
+                                    command::JoinCommand::handle_spawn_packet(core_->get_server()->get_player(), player_name);
                                     command::BanallCommand::add_spawned_player(player_name);
                                 }
-
-                                
                                 command::ModDetectCommand::handle_spawn_packet(spawn_data);
                             }
                             
-                            
                             if (text_parse.get("type") == "local") {
-                                spdlog::info("Detected local player spawn - applying zoom mod, JP flag, and balance console message");
-                                
+                                uint32_t user_id = 0;
+                                try {
+                                    std::string uid_str = text_parse.get("userID");
+                                    if (!uid_str.empty()) user_id = std::stoul(uid_str);
+                                } catch (...) {}
+
+                                utils::PlayerTracker::get_instance().update_player_info(
+                                    net_id, user_id, player_name, text_parse.get("country"), true
+                                );
+
+                                auto parse_cloth = [&](const std::string& key) -> int {
+                                    try {
+                                        std::string val = text_parse.get(key);
+                                        if (!val.empty()) return std::stoi(val);
+                                    } catch (...) {}
+                                    return 0;
+                                };
+
+                                int hair = parse_cloth("cloth_hair");
+                                int shirt = parse_cloth("cloth_shirt");
+                                int pants = parse_cloth("cloth_pants");
+                                int shoes = parse_cloth("cloth_feet");
+                                int face = parse_cloth("cloth_face");
+                                int hand = parse_cloth("cloth_hand");
+                                int back = parse_cloth("cloth_back");
+                                int hat = parse_cloth("cloth_mask");
+                                int neck = parse_cloth("cloth_necklace");
+                                int ances = parse_cloth("cloth_ances");
+
+                                utils::PlayerTracker::get_instance().update_clothing(
+                                    hat, shirt, pants, shoes, face, hand, back, hair, neck, 2190853119, ances
+                                );
+                                spdlog::info("[OnSpawn] Local player clothing tracked: hat={}, shirt={}, pants={}, shoes={}, face={}, hand={}, back={}, hair={}, neck={}, ances={}",
+                                             hat, shirt, pants, shoes, face, hand, back, hair, neck, ances);
+
                                 std::string modified_data = spawn_data;
                                 auto replace_or_add_field = [](std::string& data, const std::string& field, const std::string& value) {
                                     std::string search_pattern = field + "|";
@@ -655,6 +630,7 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                 replace_or_add_field(modified_data, "mstate", "1");
                                 bool sm_enabled = core_->get_config().get<bool>("player.sm_enabled");
                                 replace_or_add_field(modified_data, "smstate", sm_enabled ? "1" : "0");
+                                
                                 int title_icon = core_->get_config().get<int>("player.title_icon");
                                 if (title_icon > 0) {
                                     replace_or_add_field(modified_data, "titleIcon", std::to_string(title_icon));
@@ -667,6 +643,9 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                     replace_or_add_field(modified_data, "platformID", local_info.platform_id);
                                 }
                                 
+                                // Inject visual clothing into local player spawn string
+                                utils::VisualItemsManager::get_instance().inject_spawn_clothing(modified_data);
+
                                 packet::Variant modified_variant{};
                                 modified_variant.add("OnSpawn");
                                 modified_variant.add(modified_data);
@@ -677,32 +656,15 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                 modified_byte_stream.write(game_update_packet);
                                 modified_byte_stream.write_data(modified_ext_data.data(), modified_ext_data.size());
                                 byte_stream = std::move(modified_byte_stream);
-                                spdlog::info("Applied zoom mod and JP flag to local player spawn");
-                                
-                                
-                                if (sm_enabled) {
-                                    packet::Variant warning_var{};
-                                    warning_var.add("OnAddNotification");
-                                    warning_var.add("interface/atomic_button.rttex");
-                                    warning_var.add("`4Long Punch Enabled `w(BANNABLE use /sm to turn off)");
-                                    warning_var.add("audio/hub_open.wav");
-                                    warning_var.add(0);
-                                    std::vector<std::byte> warning_ext_data = warning_var.serialize();
-                                    packet::GameUpdatePacket warning_pkt{};
-                                    warning_pkt.type = packet::PACKET_CALL_FUNCTION;
-                                    warning_pkt.net_id = -1;
-                                    warning_pkt.flags.extended = 1;
-                                    warning_pkt.data_size = static_cast<uint32_t>(warning_ext_data.size());
-                                    ByteStream<std::uint16_t> warning_bs{};
-                                    warning_bs.write(packet::NET_MESSAGE_GAME_PACKET);
-                                    warning_bs.write(warning_pkt);
-                                    warning_bs.write_data(warning_ext_data.data(), warning_ext_data.size());
-                                    to_player->send_packet(warning_bs.get_data(), 0);
-                                    spdlog::warn("Sent long punch warning notification - SM mod is enabled");
+                                spdlog::info("Applied clean OnSpawn");
+
+                                // Only assert visual character state if visual items are equipped
+                                if (utils::VisualItemsManager::get_instance().is_enabled() &&
+                                    utils::VisualItemsManager::get_instance().has_any_visual_equipped()) {
+                                    utils::VisualItemsManager::get_instance().send_character_state(to_player, net_id);
                                 }
                             }
                         }
-                        
                         else if (function_name == "OnSendToServer") {
                             bool handled = false;
                             for (size_t i = 1; i < variants.size(); ++i) {
@@ -712,9 +674,7 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                     handled = true;
                                 }
                             }
-
-                            
-                            if (!handled) {
+                            if (!handled && variants.size() >= 5) {
                                 std::string server_info = variant.get<std::string>(4);
                                 if (!server_info.empty()) {
                                     command::DoorIDCommand::handle_send_to_server(server_info);
@@ -726,8 +686,6 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                 uint32_t s_hash = variant.get<uint32_t>(1);
                                 utils::ItemsDatPatcher::set_server_hash(s_hash);
                                 uint32_t p_hash = utils::ItemsDatPatcher::get_patched_hash();
-                                spdlog::info("[ItemsDatPatcher] Intercepted OnSuperMain: server items.dat hash={}, patched hash={}", s_hash, p_hash);
-
                                 if (p_hash != 0) {
                                     variant.set(1, p_hash);
                                     std::vector<std::byte> new_ext = variant.serialize();
@@ -758,58 +716,45 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                         (int)v2.x, (int)v2.y, (int)v2.z,
                                         skin, (int)v4.x
                                     );
-                                    spdlog::info("[REAL CLOTHING] Captured official clothing: hat={}, shirt={}, pants={}, shoes={}, face={}, hand={}, skin={}",
-                                                 (int)v0.x, (int)v0.y, (int)v0.z, (int)v1.x, (int)v1.y, (int)v1.z, skin);
+
+                                    if (utils::VisualItemsManager::get_instance().patch_server_clothing(variant, local_player.netID)) {
+                                        std::vector<std::byte> new_ext = variant.serialize();
+                                        game_update_packet.data_size = static_cast<uint32_t>(new_ext.size());
+                                        ByteStream<std::uint16_t> new_bs{};
+                                        new_bs.write(packet::NET_MESSAGE_GAME_PACKET);
+                                        new_bs.write(game_update_packet);
+                                        new_bs.write_data(new_ext.data(), new_ext.size());
+                                        byte_stream = std::move(new_bs);
+                                        ext_data = std::move(new_ext);
+                                        spdlog::info("[VisualItemsManager] Patched server OnSetClothing with active visual items");
+
+                                        // Re-assert character state so punch effect remains active
+                                        utils::VisualItemsManager::get_instance().send_character_state(to_player, local_player.netID);
+                                    }
                                 }
                             }
-                        }
-                        else if (function_name == "OnPlayPositionedSound" || function_name == "OnItemEffect" ||
-                                 function_name == "OnParticleEffect" || function_name == "OnEquipNewItem" ||
-                                 function_name == "OnSetRoleSkinsAndIcons") {
-                            std::string detail = "";
-                            try {
-                                if (function_name == "OnPlayPositionedSound" && variants.size() >= 2) {
-                                    detail = fmt::format(" sound='{}'", variant.get<std::string>(1));
-                                } else if (function_name == "OnEquipNewItem" && variants.size() >= 2) {
-                                    detail = fmt::format(" item_id={}", variant.get<int32_t>(1));
-                                }
-                            } catch (...) {}
-                            spdlog::info("\033[35m[SERVER ANIMATION EFFECT]\033[0m NetID: {} | Function: {}{}", 
-                                         game_update_packet.net_id, function_name, detail);
                         }
                     }
                 }
             } catch (const std::exception& e) {
                 spdlog::warn("Error processing variant packet: {}", e.what());
-                
             }
         }
 
-        
         try {
             core::EventPacket event_packet{ *player_, *to_player, game_update_packet, ext_data };
             event_packet.from = core::EventFrom::FromServer;
             core_->get_event_dispatcher().dispatch(event_packet);
-
-            if (core_->get_config().get<bool>("log.printGameUpdatePacket")) {
-                spdlog::info(
-                    "Game packet: {} ({})",
-                    magic_enum::enum_name(game_update_packet.type),
-                    magic_enum::enum_integer(game_update_packet.type)
-                );
-            }
 
             if (!event_packet.canceled) {
                 to_player->send_packet(byte_stream.get_data(), 0);
             }
         } catch (const std::exception& e) {
             spdlog::error("Error in game packet event dispatch: {}", e.what());
-            
             to_player->send_packet(byte_stream.get_data(), 0);
         }
     } catch (const std::exception& e) {
         spdlog::error("Error processing game packet: {}", e.what());
-        
         try {
             to_player->send_packet(byte_stream.get_data(), 0);
         } catch (const std::exception& send_error) {

@@ -204,14 +204,18 @@ function(detect_compiler COMPILER COMPILER_VERSION COMPILER_RUNTIME COMPILER_RUN
         list(APPEND _KNOWN_MSVC_RUNTIME_VALUES MultiThreaded MultiThreadedDLL)
         list(APPEND _KNOWN_MSVC_RUNTIME_VALUES MultiThreadedDebug MultiThreadedDebugDLL)
         list(APPEND _KNOWN_MSVC_RUNTIME_VALUES MultiThreaded$<$<CONFIG:Debug>:Debug> MultiThreaded$<$<CONFIG:Debug>:Debug>DLL)
+        list(APPEND _KNOWN_MSVC_RUNTIME_VALUES "$<$<CONFIG:Release>:MultiThreadedDLL>$<$<CONFIG:Debug>:MultiThreadedDebugDLL>")
+        list(APPEND _KNOWN_MSVC_RUNTIME_VALUES "$<$<CONFIG:Debug>:MultiThreadedDebugDLL>$<$<CONFIG:Release>:MultiThreadedDLL>")
+        list(APPEND _KNOWN_MSVC_RUNTIME_VALUES "$<$<CONFIG:Release>:MultiThreaded>$<$<CONFIG:Debug>:MultiThreadedDebug>")
+        list(APPEND _KNOWN_MSVC_RUNTIME_VALUES "$<$<CONFIG:Debug>:MultiThreadedDebug>$<$<CONFIG:Release>:MultiThreaded>")
 
-        # only accept the 6 possible values, otherwise we don't don't know to map this
+        # only accept known possible values, otherwise we don't know how to map this
         if(NOT _msvc_runtime_library IN_LIST _KNOWN_MSVC_RUNTIME_VALUES)
             message(FATAL_ERROR "CMake-Conan: unable to map MSVC runtime: ${_msvc_runtime_library} to Conan settings")
         endif()
 
-        # Runtime is "dynamic" in all cases if it ends in DLL
-        if(_msvc_runtime_library MATCHES ".*DLL$")
+        # Runtime is "dynamic" in all cases if it contains DLL
+        if(_msvc_runtime_library MATCHES "DLL")
             set(_COMPILER_RUNTIME "dynamic")
         else()
             set(_COMPILER_RUNTIME "static")
@@ -220,7 +224,7 @@ function(detect_compiler COMPILER COMPILER_VERSION COMPILER_RUNTIME COMPILER_RUN
 
         # Only define compiler.runtime_type when explicitly requested
         # If a generator expression is used, let Conan handle it conditional on build_type
-        if(NOT _msvc_runtime_library MATCHES "<CONFIG:Debug>:Debug>")
+        if(NOT _msvc_runtime_library MATCHES "<CONFIG:")
             if(_msvc_runtime_library MATCHES "Debug")
                 set(_COMPILER_RUNTIME_TYPE "Debug")
             else()

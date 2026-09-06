@@ -14,9 +14,12 @@
 #include "../packet/packet_types.hpp"
 #include "../packet/tank_packet.hpp"
 #include "byte_stream.hpp"
+#include "player_tracker.hpp"
+#include "visual_items_manager.hpp"
 
 namespace command {
 extern std::unordered_map<int, int> g_clothing_slots;
+extern std::unordered_set<uint32_t> g_all_visual_items;
 }
 
 namespace utils {
@@ -34,111 +37,143 @@ public:
         return instance;
     }
 
-    void send_inventory(core::Core* core, uint32_t net_id, uint16_t visual_hand_id = 0) {
+    std::vector<std::byte> get_patched_inventory_data_unlocked(const std::unordered_map<int, int>& clothing_slots) const {
+        if (raw_server_ext_data_.size() < 7) {
+            return raw_server_ext_data_;
+        }
+
+        std::vector<std::byte> patched = raw_server_ext_data_;
+
+        uint32_t inv_size = *reinterpret_cast<const uint32_t*>(&patched[1]);
+        uint16_t item_count = *reinterpret_cast<const uint16_t*>(&patched[5]);
+
+        size_t items_start = 7;
+        size_t items_end = items_start + static_cast<size_t>(item_count) * 4;
+        if (items_end > patched.size()) {
+            return patched;
+        }
+
+        std::unordered_set<uint16_t> all_ids;
+        for (uint32_t id : command::g_all_visual_items) {
+            if (id > 0) all_ids.insert(static_cast<uint16_t>(id));
+        }
+        for (uint32_t id : utils::VisualItemsManager::get_instance().get_all_visual_items()) {
+            if (id > 0) all_ids.insert(static_cast<uint16_t>(id));
+        }
+        for (const auto& [slot, item_id] : clothing_slots) {
+            if (item_id > 0) all_ids.insert(static_cast<uint16_t>(item_id));
+        }
+
+        if (all_ids.empty()) {
+            return patched;
+        }
+
+        // Uncheck real server clothing items whose slots are overridden by visual clothing
+        auto base = PlayerTracker::get_instance().get_server_clothing();
+        std::unordered_set<uint16_t> overridden_server_items;
+        for (const auto& [slot, item_id] : clothing_slots) {
+            if (item_id <= 0) continue;
+            int s_item = 0;
+            switch (slot) {
+                case 0: s_item = base.hat; break;
+                case 1: s_item = base.shirt; break;
+                case 2: s_item = base.pants; break;
+                case 3: s_item = base.shoes; break;
+                case 4: s_item = base.face; break;
+                case 5: s_item = base.hand; break;
+                case 6: s_item = base.back; break;
+                case 7: s_item = base.hair; break;
+                case 8: s_item = base.neck; break;
+                case 9: s_item = base.ances; break;
+                default: break;
+            }
+            if (s_item > 0 && s_item != item_id) {
+                overridden_server_items.insert(static_cast<uint16_t>(s_item));
+            }
+        }
+
+        for (uint16_t i = 0; i < item_count; ++i) {
+            size_t offset = items_start + static_cast<size_t>(i) * 4;
+            uint16_t id = *reinterpret_cast<const uint16_t*>(&patched[offset]);
+            if (overridden_server_items.count(id)) {
+                patched[offset + 3] = std::byte{ 0 }; // Remove checkmark from real item!
+            }
+        }
+
+        for (uint16_t vid : all_ids) {
+            bool is_equipped = false;
+            for (const auto& [slot, item_id] : clothing_slots) {
+                if (item_id == static_cast<int>(vid)) {
+                    is_equipped = true;
+                    break;
+                }
+            }
+            uint8_t target_flags = is_equipped ? 1 : 0;
+
+            bool found = false;
+            for (uint16_t i = 0; i < item_count; ++i) {
+                size_t offset = items_start + static_cast<size_t>(i) * 4;
+                uint16_t id = *reinterpret_cast<const uint16_t*>(&patched[offset]);
+                if (id == vid) {
+                    // Update flags: 1 if equipped, 0 if in backpack unequipped
+                    patched[offset + 3] = static_cast<std::byte>(target_flags);
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                // Insert 4 bytes at items_end: [id: uint16, amount: uint8 (1), flags: uint8 (target_flags)]
+                std::byte entry[4];
+                *reinterpret_cast<uint16_t*>(&entry[0]) = vid;
+                entry[2] = std::byte{ 1 }; // amount = 1 (stays in backpack)
+                entry[3] = static_cast<std::byte>(target_flags); // 1 = equipped, 0 = in backpack
+
+                patched.insert(patched.begin() + items_end, entry, entry + 4);
+                item_count++;
+                items_end += 4;
+
+                // Update item_count in header
+                *reinterpret_cast<uint16_t*>(&patched[5]) = item_count;
+                if (item_count > inv_size) {
+                    inv_size = item_count;
+                    *reinterpret_cast<uint32_t*>(&patched[1]) = inv_size;
+                }
+            }
+        }
+
+        return patched;
+    }
+
+    void send_inventory(core::Core* core) {
         if (!core || !core->get_server() || !core->get_server()->get_player()) return;
 
         std::lock_guard<std::mutex> lock(mutex_);
-
-        // If inventory is empty, initialize with basic defaults (Fist and Wrench)
-        if (items_.empty()) {
-            items_[18] = InventoryItem{ 18, 1, 0 };
-            items_[32] = InventoryItem{ 32, 1, 0 };
-            if (inventory_size_ == 0) inventory_size_ = 16;
+        if (!has_raw_data_ || raw_server_ext_data_.size() < 7) {
+            spdlog::warn("InventoryManager: No raw server inventory data available to patch!");
+            return;
         }
 
-        std::vector<InventoryItem> item_list;
-        item_list.reserve(items_.size() + 12);
+        std::vector<std::byte> patched = get_patched_inventory_data_unlocked(command::g_clothing_slots);
 
-        // Always put Fist (18) and Wrench (32) first in hotbar
-        item_list.push_back(InventoryItem{ 18, 1, 0 });
-        if (items_.find(32) != items_.end()) {
-            item_list.push_back(items_[32]);
-        } else {
-            item_list.push_back(InventoryItem{ 32, 1, 0 });
-        }
-
-        std::unordered_set<uint16_t> added_ids;
-        added_ids.insert(18);
-        added_ids.insert(32);
-
-        // Add all real inventory items
-        for (const auto& [id, itm] : items_) {
-            if (added_ids.count(id)) continue;
-            item_list.push_back(itm);
-            added_ids.insert(id);
-        }
-
-        // Add visual hand weapon as EQUIPPED (flags = 1)
-        if (visual_hand_id > 0) {
-            if (!added_ids.count(visual_hand_id)) {
-                item_list.push_back(InventoryItem{ visual_hand_id, 1, 1 });
-                added_ids.insert(visual_hand_id);
-            } else {
-                for (auto& itm : item_list) {
-                    if (itm.id == visual_hand_id) {
-                        itm.flags = 1;
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Add all active visual clothing items as EQUIPPED (flags = 1)
-        for (const auto& [slot, item_id] : command::g_clothing_slots) {
-            if (item_id <= 0) continue;
-            uint16_t uid = static_cast<uint16_t>(item_id);
-            if (!added_ids.count(uid)) {
-                item_list.push_back(InventoryItem{ uid, 1, 1 });
-                added_ids.insert(uid);
-            } else {
-                for (auto& itm : item_list) {
-                    if (itm.id == uid) {
-                        itm.flags = 1;
-                        break;
-                    }
-                }
-            }
-        }
-
-        std::vector<std::byte> ext_data;
-        ext_data.reserve(7 + item_list.size() * 4);
-        ext_data.push_back(std::byte{ 0x01 });
-
-        uint32_t inv_size = inventory_size_ > 0 ? inventory_size_ : 16;
-        if (item_list.size() > inv_size) {
-            inv_size = static_cast<uint32_t>(item_list.size());
-        }
-        const std::byte* size_ptr = reinterpret_cast<const std::byte*>(&inv_size);
-        ext_data.insert(ext_data.end(), size_ptr, size_ptr + 4);
-
-        uint16_t count = static_cast<uint16_t>(item_list.size());
-        const std::byte* count_ptr = reinterpret_cast<const std::byte*>(&count);
-        ext_data.insert(ext_data.end(), count_ptr, count_ptr + 2);
-
-        for (const auto& item : item_list) {
-            const std::byte* id_ptr = reinterpret_cast<const std::byte*>(&item.id);
-            ext_data.insert(ext_data.end(), id_ptr, id_ptr + 2);
-            ext_data.push_back(static_cast<std::byte>(item.amount));
-            ext_data.push_back(static_cast<std::byte>(item.flags));
-        }
-
-        packet::GameUpdatePacket pkt{};
-        pkt.type = packet::PACKET_SEND_INVENTORY_STATE;
-        pkt.net_id = 0xFFFFFFFF; // ALWAYS -1 for local inventory!
-        pkt.flags.extended = 1;
-        pkt.data_size = static_cast<uint32_t>(ext_data.size());
+        packet::GameUpdatePacket pkt = raw_server_game_packet_;
+        pkt.data_size = static_cast<uint32_t>(patched.size());
 
         ByteStream<std::uint16_t> bs{};
         bs.write(packet::NET_MESSAGE_GAME_PACKET);
         bs.write(pkt);
-        bs.write_data(ext_data.data(), ext_data.size());
+        bs.write_data(patched.data(), patched.size());
 
         core->get_server()->get_player()->send_packet(bs.get_data(), 0);
-        spdlog::info("InventoryManager: Forwarded inventory ({} items, visual hand {}) to client (net_id=-1)",
-                     count, visual_hand_id);
+        spdlog::info("InventoryManager: Forwarded authentic patched inventory ({} bytes, original {} bytes) with visual items EQUIPPED",
+                     patched.size(), raw_server_ext_data_.size());
     }
 
-    void parse_inventory(const std::vector<std::byte>& data) {
+    void send_inventory(core::Core* core, uint32_t /*net_id*/, uint16_t /*visual_hand_id*/ = 0) {
+        send_inventory(core);
+    }
+
+    void parse_inventory(const std::vector<std::byte>& data, const packet::GameUpdatePacket* pkt = nullptr) {
         std::lock_guard<std::mutex> lock(mutex_);
         
         spdlog::info("=== PARSING INVENTORY ===");
@@ -146,11 +181,17 @@ public:
         
         if (data.size() < 7) {
             spdlog::warn("Inventory data too small: {} bytes", data.size());
-            
             items_.clear();
             inventory_size_ = 0;
             return;
         }
+
+        // Save raw server data for authentic patching
+        raw_server_ext_data_ = data;
+        if (pkt) {
+            raw_server_game_packet_ = *pkt;
+        }
+        has_raw_data_ = true;
         
         
         std::ostringstream hex;
@@ -205,6 +246,49 @@ public:
         }
         
         spdlog::info("✓ Parsed {} inventory items", items_.size());
+    }
+
+    void update_inventory_item(uint32_t item_id, float amount, uint32_t flags) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        uint16_t id = static_cast<uint16_t>(item_id);
+        uint8_t count = static_cast<uint8_t>(amount);
+
+        if (count == 0) {
+            items_.erase(id);
+        } else {
+            items_[id] = InventoryItem{ id, count, static_cast<uint8_t>(flags) };
+        }
+
+        if (raw_server_ext_data_.size() >= 7) {
+            uint16_t item_count = *reinterpret_cast<const uint16_t*>(&raw_server_ext_data_[5]);
+            size_t items_start = 7;
+            for (uint16_t i = 0; i < item_count; ++i) {
+                size_t offset = items_start + static_cast<size_t>(i) * 4;
+                if (offset + 4 <= raw_server_ext_data_.size()) {
+                    uint16_t entry_id = *reinterpret_cast<const uint16_t*>(&raw_server_ext_data_[offset]);
+                    if (entry_id == id) {
+                        if (count == 0) {
+                            raw_server_ext_data_.erase(raw_server_ext_data_.begin() + offset, raw_server_ext_data_.begin() + offset + 4);
+                            item_count--;
+                            *reinterpret_cast<uint16_t*>(&raw_server_ext_data_[5]) = item_count;
+                        } else {
+                            raw_server_ext_data_[offset + 2] = static_cast<std::byte>(count);
+                            raw_server_ext_data_[offset + 3] = static_cast<std::byte>(flags);
+                        }
+                        return;
+                    }
+                }
+            }
+            if (count > 0) {
+                std::byte entry[4];
+                *reinterpret_cast<uint16_t*>(&entry[0]) = id;
+                entry[2] = static_cast<std::byte>(count);
+                entry[3] = static_cast<std::byte>(flags);
+                raw_server_ext_data_.insert(raw_server_ext_data_.begin() + items_start + item_count * 4, entry, entry + 4);
+                item_count++;
+                *reinterpret_cast<uint16_t*>(&raw_server_ext_data_[5]) = item_count;
+            }
+        }
     }
     
     bool has_item(uint16_t item_id) const {
@@ -263,6 +347,10 @@ private:
     uint32_t inventory_size_;
     std::unordered_map<uint16_t, InventoryItem> items_;
     std::chrono::steady_clock::time_point last_update_;
+
+    packet::GameUpdatePacket raw_server_game_packet_{};
+    std::vector<std::byte> raw_server_ext_data_{};
+    bool has_raw_data_{ false };
 };
 
 } 

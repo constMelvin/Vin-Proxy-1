@@ -214,6 +214,13 @@ public:
             case 604: // Crystal Sword
             case 7830: // Heartsword
             case 7832: // Golden Heartsword
+                prof.type = WeaponType::SWORD;
+                prof.anim_type = 3; // Weapon swing action
+                prof.anim_item_id = hand_id;
+                prof.sound_file = "audio/slash.wav";
+                prof.particle_ids = { 190, 192 }; // Heart burst and slash trail
+                prof.is_projectile = false;
+                return prof;
             case 9116: // Red Laser Scimitar
             case 9118: // Green Laser Scimitar
             case 9120: // Blue Laser Scimitar
@@ -316,9 +323,8 @@ public:
         auto* client_player = core->get_server()->get_player();
         WeaponProfile prof = get_profile(hand_id);
 
-        // 1. Play weapon sound effect (both packet types to guarantee playback)
+        // 1. Play authentic weapon sound effect
         if (!prof.sound_file.empty()) {
-            // Variant method: OnPlaySound
             packet::Variant snd_var{};
             snd_var.add("OnPlaySound");
             snd_var.add(prof.sound_file);
@@ -337,95 +343,6 @@ public:
             snd_bs.write_data(snd_data.data(), snd_data.size());
             client_player->send_packet(snd_bs.get_data(), 0);
         }
-
-        // 2. Trigger OnItemEffect for visual aura / particles
-        {
-            packet::Variant eff_var{};
-            eff_var.add("OnItemEffect");
-            eff_var.add(static_cast<int32_t>(net_id));
-            eff_var.add(static_cast<int32_t>(hand_id));
-
-            std::vector<std::byte> eff_data = eff_var.serialize();
-            packet::GameUpdatePacket eff_pkt{};
-            eff_pkt.type = packet::PACKET_CALL_FUNCTION;
-            eff_pkt.net_id = 0xFFFFFFFF;
-            eff_pkt.flags.extended = 1;
-            eff_pkt.data_size = static_cast<uint32_t>(eff_data.size());
-
-            ByteStream<std::uint16_t> eff_bs{};
-            eff_bs.write(packet::NET_MESSAGE_GAME_PACKET);
-            eff_bs.write(eff_pkt);
-            eff_bs.write_data(eff_data.data(), eff_data.size());
-
-            client_player->send_packet(eff_bs.get_data(), 0);
-        }
-
-        // 3. Spawn projectile / impact particles
-        float px = tank->vec_x;
-        float py = tank->vec_y;
-        float tx = px;
-        float ty = py;
-
-        if (tank->int_x > 0 && tank->int_y > 0) {
-            tx = tank->int_x * 32.0f + 16.0f;
-            ty = tank->int_y * 32.0f + 16.0f;
-        } else {
-            bool facing_left = (tank->flags & packet::PACKET_FLAG_ROTATE_LEFT) != 0;
-            tx = px + (facing_left ? -96.0f : 96.0f);
-            ty = py;
-        }
-
-        if (prof.is_projectile) {
-            // Send smooth moving projectile particle from player to target
-            uint32_t proj_p = prof.particle_ids.empty() ? 217 : prof.particle_ids[0];
-            send_projectile(client_player, proj_p, px, py, tx, ty);
-
-            // Send impact burst at target tile
-            uint32_t impact_p = prof.particle_ids.size() > 1 ? prof.particle_ids[1] : 143;
-            send_particle(client_player, impact_p, tx, ty);
-        } else {
-            // Melee slash / smash effect directly on target tile
-            if (!prof.particle_ids.empty()) {
-                send_particle(client_player, prof.particle_ids[0], tx, ty);
-            }
-        }
-
-        // 4. Send visual_punch PACKET_STATE to client so Growtopia renders the authentic weapon swing!
-        {
-            packet::TankUpdatePacket visual_punch = *tank;
-            visual_punch.type = static_cast<uint8_t>(packet::PACKET_STATE);
-            visual_punch.net_id = static_cast<int32_t>(net_id);
-
-            // Keep direction and movement without forcing extended fist punch flags for melee
-            visual_punch.flags = (tank->flags & (packet::PACKET_FLAG_ROTATE_LEFT | packet::PACKET_FLAG_ON_SOLID | packet::PACKET_FLAG_ON_JUMP));
-
-            auto captured = get_captured_profile(hand_id);
-            if (captured && captured->is_valid) {
-                // Exact 1:1 replica of authentic punch captured from real item!
-                visual_punch.animation_type = captured->animation_type;
-                visual_punch.int_data = captured->int_data;
-                visual_punch.flags |= captured->flags;
-            } else {
-                visual_punch.int_data = (prof.anim_item_id != 0) ? prof.anim_item_id : hand_id;
-                if (prof.type == WeaponType::SWORD || prof.type == WeaponType::TOOL) {
-                    visual_punch.animation_type = 0;
-                } else {
-                    visual_punch.animation_type = prof.anim_type;
-                    visual_punch.flags |= (packet::PACKET_FLAG_ON_PUNCHED | packet::PACKET_FLAG_ON_TILE_ACTION);
-                }
-            }
-
-            ByteStream<std::uint16_t> bs{};
-            bs.write(packet::NET_MESSAGE_GAME_PACKET);
-            bs.write(visual_punch);
-
-            client_player->send_packet(bs.get_data(), 0);
-            spdlog::info("\033[35m[WeaponAnimationManager] Sent visual_punch (net_id={}, anim_type={}, flags=0x{:X}, int_data={})\033[0m",
-                         visual_punch.net_id, (int)visual_punch.animation_type, visual_punch.flags, visual_punch.int_data);
-        }
-
-        spdlog::info("[WeaponAnimationManager] Played animation (hand_id={}, anim_item_id={}, anim_type={}, sound={})",
-                     hand_id, prof.anim_item_id, static_cast<int>(prof.anim_type), prof.sound_file);
     }
 
 private:

@@ -960,6 +960,7 @@ static void TabWorld() {
 
 static extension::item_finder::ItemDatabase* g_item_db = nullptr;
 void SetItemDatabase(extension::item_finder::ItemDatabase* db) { g_item_db = db; }
+extension::item_finder::ItemDatabase* GetItemDatabase() { return g_item_db; }
 
 static void TabItemDB() {
     ImGui::TextDisabled("Use search to query decoded_items.json");

@@ -60,7 +60,7 @@ public:
     PlayerInfo get_player_by_netid(uint32_t netID) const;
     PlayerPosition get_player_position(uint32_t netID) const;
     bool has_local_player() const;
-    
+    uint32_t get_local_netid() const { return local_player_netid_; }
     
     std::unordered_map<uint32_t, PlayerInfo> get_all_players() const;
     static std::string get_device_from_platform_id(const std::string& platform_id);
@@ -75,10 +75,11 @@ public:
 
     void update_clothing(int hat, int shirt, int pants, int shoes, int face, int hand, int back, int hair, int neck, uint32_t skin, int ances) {
         std::lock_guard<std::mutex> lock(mutex_);
-        clothing_.hat = hat; clothing_.shirt = shirt; clothing_.pants = pants;
-        clothing_.shoes = shoes; clothing_.face = face; clothing_.hand = hand;
-        clothing_.back = back; clothing_.hair = hair; clothing_.neck = neck;
-        clothing_.skin_color = skin; clothing_.ances = ances;
+        server_clothing_.hat = hat; server_clothing_.shirt = shirt; server_clothing_.pants = pants;
+        server_clothing_.shoes = shoes; server_clothing_.face = face; server_clothing_.hand = hand;
+        server_clothing_.back = back; server_clothing_.hair = hair; server_clothing_.neck = neck;
+        server_clothing_.skin_color = skin; server_clothing_.ances = ances;
+        clothing_ = server_clothing_;
         if (local_player_netid_ > 0 && players_.count(local_player_netid_)) {
             players_[local_player_netid_].cloth_hand = (hand > 0) ? static_cast<uint32_t>(hand) : 0;
         }
@@ -111,6 +112,19 @@ public:
         return clothing_;
     }
 
+    ClothingInfo get_server_clothing() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return server_clothing_;
+    }
+
+    void reset_to_server_clothing() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        clothing_ = server_clothing_;
+        if (local_player_netid_ > 0 && players_.count(local_player_netid_)) {
+            players_[local_player_netid_].cloth_hand = (server_clothing_.hand > 0) ? static_cast<uint32_t>(server_clothing_.hand) : 0;
+        }
+    }
+
     void clear();
 
 private:
@@ -120,6 +134,7 @@ private:
     mutable std::mutex mutex_;
     std::unordered_map<uint32_t, PlayerInfo> players_; 
     uint32_t local_player_netid_ = 0;
+    ClothingInfo server_clothing_;
     ClothingInfo clothing_;
 };
 

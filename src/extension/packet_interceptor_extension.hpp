@@ -66,13 +66,11 @@ private:
         
         if (game_packet.type == packet::PACKET_SEND_INVENTORY_STATE) {
             spdlog::info(">>> PACKET_SEND_INVENTORY_STATE received! Size: {}", ext_data.size());
-            handle_inventory_state(ext_data);
+            auto& inv_mgr = utils::InventoryManager::get_instance();
+            inv_mgr.parse_inventory(ext_data, &game_packet);
 
-            if (!command::g_clothing_slots.empty()) {
-                auto hand_it = command::g_clothing_slots.find(5);
-                uint16_t hand_id = (hand_it != command::g_clothing_slots.end() && hand_it->second > 0)
-                                   ? static_cast<uint16_t>(hand_it->second) : 0;
-                utils::InventoryManager::get_instance().send_inventory(core_, 0xFFFFFFFF, hand_id);
+            if (!command::g_clothing_slots.empty() || !command::g_all_visual_items.empty()) {
+                inv_mgr.send_inventory(core_);
                 const_cast<core::EventPacket&>(event).canceled = true;
             }
             return;
@@ -167,6 +165,7 @@ private:
 
     void handle_modify_inventory(const packet::TankUpdatePacket* tank) {
         spdlog::debug("Inventory modified: item {} count {}", tank->int_data, (int)tank->float_var);
+        utils::InventoryManager::get_instance().update_inventory_item(tank->int_data, tank->float_var, tank->flags);
     }
 
     void handle_tile_change(const packet::TankUpdatePacket* tank) {

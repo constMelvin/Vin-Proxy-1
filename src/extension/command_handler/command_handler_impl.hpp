@@ -60,6 +60,7 @@
 #include "dropat_command.hpp"
 #include "utility_commands.hpp"
 #include "immune_command.hpp"
+#include "search_command.hpp"
 #include "../../core/core.hpp"
 #include "../../client/client.hpp"
 #include "../../server/server.hpp"
@@ -87,6 +88,7 @@ public:
         
         command::AdminCommand::set_core(core_);
         command::FindCommand::set_core(core_);
+        command::SearchCommand::set_core(core_);
         command::VendLocCommand::set_core(core_);
         command::VendTPCommand::set_core(core_);
         command::VendLogsCommand::set_core(core_);
@@ -234,6 +236,7 @@ public:
         register_command(std::make_unique<command::AutoCrimeCommand>());
         register_command(std::make_unique<command::AdminCommand>());
         register_command(std::make_unique<command::FindCommand>());
+        register_command(std::make_unique<command::SearchCommand>());
         register_command(std::make_unique<command::VendLocCommand>());
         register_command(std::make_unique<command::VendTPCommand>());
         register_command(std::make_unique<command::VendLogsCommand>());
@@ -722,6 +725,19 @@ private:
                 event.canceled = true;
                 return;
             }
+            else if (dialog_name == "clothes_dialog") {
+                command::ClothesCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), button_clicked, text_parse);
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "search_dialog" || dialog_name == "search_detail") {
+                auto* server = core_->get_server();
+                if (server && server->get_player()) {
+                    command::SearchCommand::handle_dialog_return(server->get_player(), button_clicked, text_parse);
+                }
+                event.canceled = true;
+                return;
+            }
         }
         
         
@@ -756,6 +772,17 @@ private:
             else if (command_text == "info") {
                 send_gui_to_player(const_cast<player::Player*>(&event.get_player()), "info");
                 event.canceled = true;
+                return;
+            }
+            else if (command_text == "clothes" || command_text == "visual") {
+                command::ClothesCommand::send_clothes_dialog(const_cast<player::Player*>(&event.get_player()));
+                event.canceled = true;
+                return;
+            }
+            else if (command_text == "search" || command_text.find("search ") == 0) {
+                if (execute_command(const_cast<player::Player*>(&event.get_player()), command_text)) {
+                    event.canceled = true;
+                }
                 return;
             }
             
@@ -913,6 +940,9 @@ private:
                 }
                 else if (dialog_name == "pathfind_gui") {
                     command::FindPathCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), button_clicked, dialog_data);
+                }
+                else if (dialog_name == "clothes_dialog") {
+                    command::ClothesCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), button_clicked, text_parse);
                 }
                 
                 

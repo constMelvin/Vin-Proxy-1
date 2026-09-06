@@ -41,3 +41,4 @@ void AppendPacket(const std::string& direction, const std::string& data);
 
 
 void SetItemDatabase(class extension::item_finder::ItemDatabase* db);
+class extension::item_finder::ItemDatabase* GetItemDatabase();

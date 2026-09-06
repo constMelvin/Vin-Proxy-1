@@ -13,6 +13,7 @@
 #include "../command_handler/vendloc_command.hpp"
 #include "../command_handler/clothes_command.hpp"
 #include "../command_handler/utility_commands.hpp"
+#include "../../utils/visual_items_manager.hpp"
 #include <spdlog/spdlog.h>
 #include <memory>
 #include <unordered_map>
@@ -30,11 +31,7 @@ class ItemFinderExtension final : public IExtension {
     
     std::unordered_map<uint32_t, std::string> player_searches_;
     std::unordered_map<uint32_t, std::string> player_search_types_;
-    
-    // Track visual inventory items per player (net_id -> set of item_ids)
-    std::unordered_map<uint32_t, std::unordered_set<uint32_t>> visual_inventory_items_;
-    std::unordered_set<uint32_t> all_visual_items_;
-    
+
 public:
     PROVIDE_EXT_UID(0x4954454D); 
 
@@ -168,17 +165,25 @@ public:
                         
                         if (item_id > 0) {
                             const ItemInfo* item = database_ ? database_->get_item_by_id(item_id) : nullptr;
-                            if (all_visual_items_.count(item_id) > 0) {
+                            if (command::g_all_visual_items.count(item_id) > 0 ||
+                                utils::VisualItemsManager::get_instance().get_all_visual_items().count(item_id) > 0) {
                                 evt.canceled = true; // Prevent real server from rejecting fake item
                                 
                                 int clothing_type = item ? item->clothing_type : 6;
+                                if (item) {
+                                    std::string lower_name = item->name;
+                                    std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+                                    if (lower_name.find("ancestral") != std::string::npos ||
+                                        lower_name.find("samille") != std::string::npos ||
+                                        lower_name.find("chakram") != std::string::npos) {
+                                        clothing_type = 9;
+                                    }
+                                }
                                 int anim_type = item ? item->anim_type : -1;
                                 
                                 bool equipped = command::ClothesCommand::toggle_item(item_id, clothing_type, anim_type);
-                                if (core_ && core_->get_client() && core_->get_client()->get_player()) {
-                                    command::ClothesCommand cmd;
-                                    cmd.set_core(core_);
-                                    cmd.execute(core_->get_client(), {});
+                                if (core_) {
+                                    command::ClothesCommand::send_clothing_change(core_->get_client());
                                 }
                                 
                                 std::string item_name = item ? item->name : fmt::format("Item {}", item_id);
@@ -422,12 +427,9 @@ private:
                 int item_id = std::stoi(item_id_str);
                 
                 const ItemInfo* item = database_->get_item_by_id(item_id);
-                int clothing_type = item ? item->clothing_type : 6; 
-                int anim_type = item ? item->anim_type : -1;
                 
                 if (core_ && core_->get_client() && core_->get_client()->get_player()) {
                     auto player_info = utils::PlayerTracker::get_instance().get_local_player();
-                    uint32_t net_id = player_info.netID;
                     
                     // Send MODIFY_ITEM_INVENTORY to add item to client's inventory view
                     packet::TankUpdatePacket inv_pkt{};
@@ -444,22 +446,11 @@ private:
                     
                     player.send_packet(inv_stream.get_data(), 0);
                     
-                    visual_inventory_items_[net_id].insert(item_id);
-                    all_visual_items_.insert(item_id);
-                    
-                    bool equipped = command::ClothesCommand::toggle_item(item_id, clothing_type, anim_type);
-                    command::ClothesCommand cmd;
-                    cmd.set_core(core_);
-                    cmd.execute(core_->get_client(), {});
-                    
+                    command::g_all_visual_items.insert(static_cast<uint32_t>(item_id));
+
                     std::string item_name = item ? item->name : fmt::format("Item {}", item_id);
-                    if (equipped) {
-                        utils::PacketUtils::send_chat_message(const_cast<player::Player*>(&player), 
-                            fmt::format("`2Equipped visual item: `w{}``!", item_name));
-                    } else {
-                        utils::PacketUtils::send_chat_message(const_cast<player::Player*>(&player), 
-                            fmt::format("`4Unequipped visual item: `w{}``!", item_name));
-                    }
+                    utils::PacketUtils::send_chat_message(const_cast<player::Player*>(&player), 
+                        fmt::format("`2[VIN] Added `w{} `2to backpack! Double-click / tap it in your inventory to equip/unequip.``", item_name));
                 }
             } catch (const std::exception& e) {
                 spdlog::error("Error adding/wearing item: {}", e.what());
@@ -493,9 +484,10 @@ private:
             
             int item_id = std::stoi(item_id_str);
             
-            // Only intercept fake visual items from /find!
+            // Only intercept fake visual items!
             // Real items in player inventory must pass through to the real server!
-            if (all_visual_items_.count(item_id) == 0) {
+            if (command::g_all_visual_items.count(item_id) == 0 &&
+                utils::VisualItemsManager::get_instance().get_all_visual_items().count(item_id) == 0) {
                 return;
             }
 
@@ -504,14 +496,21 @@ private:
             
             const ItemInfo* item = database_->get_item_by_id(item_id);
             int clothing_type = item ? item->clothing_type : 6;
+            if (item) {
+                std::string lower_name = item->name;
+                std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+                if (lower_name.find("ancestral") != std::string::npos ||
+                    lower_name.find("samille") != std::string::npos ||
+                    lower_name.find("chakram") != std::string::npos) {
+                    clothing_type = 9;
+                }
+            }
             int anim_type = item ? item->anim_type : -1;
             
             bool equipped = command::ClothesCommand::toggle_item(item_id, clothing_type, anim_type);
             
-            if (core_ && core_->get_client() && core_->get_client()->get_player()) {
-                command::ClothesCommand cmd;
-                cmd.set_core(core_);
-                cmd.execute(core_->get_client(), {});
+            if (core_) {
+                command::ClothesCommand::send_clothing_change(core_->get_client());
             }
             
             std::string item_name = item ? item->name : fmt::format("Item {}", item_id);
