@@ -475,8 +475,8 @@ int main() {
             [](const std::string& key) -> std::string {
                 core::Core* core = g_core.load();
                 if (!core) return "";
-                if (key == "proxy.enabled")
-                    return core->get_config().get<bool>(key) ? "true" : "false";
+                if (key == "proxy.enabled" || key == "gui.auto_show")
+                    return core->get_config().get<bool>(key, false) ? "true" : "false";
                 if (key == "proxy.port")
                     return std::to_string(core->get_config().get<unsigned int>(key));
                 return core->get_config().get<std::string>(key);
@@ -485,7 +485,7 @@ int main() {
             [](const std::string& key, const std::string& value) {
                 core::Core* core = g_core.load();
                 if (!core) return;
-                if (key == "proxy.enabled") {
+                if (key == "proxy.enabled" || key == "gui.auto_show") {
                     core->get_config().set<bool>(key, value == "true" || value == "1");
                 } else if (key == "proxy.port") {
                     try { core->get_config().set<unsigned int>(key, (unsigned int)std::stoul(value)); }

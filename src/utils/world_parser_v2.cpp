@@ -201,7 +201,7 @@ bool World::parse(const uint8_t* data, size_t size) {
             
             
             if (tile.flags & 0x02) {
-                reader.read<uint16_t>(); 
+                tile.lock_index = reader.read<uint16_t>(); 
             }
             
             
@@ -467,7 +467,8 @@ bool World::parse(const uint8_t* data, size_t size) {
                         
                     case 44: 
                         {
-                            reader.skip(5);
+                            reader.skip(1); // unk byte
+                            tile.lock_data.owner_uid = reader.read<uint32_t>();
                             uint32_t count = reader.read<uint32_t>();
                             if (count > 100000) {
                                 spdlog::warn("VipEntrance count too large at ({}, {}): {} (clamping)",
@@ -475,7 +476,10 @@ bool World::parse(const uint8_t* data, size_t size) {
                                 had_warnings = true;
                                 count = 100000;
                             }
-                            reader.skip(count * 4);
+                            tile.lock_data.access_list.reserve(count);
+                            for (uint32_t i = 0; i < count; i++) {
+                                tile.lock_data.access_list.push_back(reader.read<uint32_t>());
+                            }
                         }
                         break;
                         

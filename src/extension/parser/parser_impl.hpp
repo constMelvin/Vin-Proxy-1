@@ -9,6 +9,7 @@
 #include "../../utils/api_client.hpp"
 #include "../../utils/text_parse.hpp"
 #include "../../packet/tank_packet.hpp"
+#include "../../utils/world_manager.hpp"
 #include "../../proxy_imgui_gui.hpp"
 #include <fmt/format.h>
 #include <spdlog/spdlog.h>
@@ -212,7 +213,7 @@ public:
                     int dl = inv_mgr.get_item_count(1796);
                     int bgl = inv_mgr.get_item_count(7188);
                     int total_wl = wl + dl * 100 + bgl * 10000;
-                    std::string balance_msg = fmt::format("Balance: [ `#{} ā | `#{} `!DL | `#{} `eBGL`w ]]", total_wl, dl, bgl);
+                    std::string balance_msg = fmt::format("Balance: [ `#{} ā | `#{} `!DL | `#{} `eBGL`w ]", total_wl, dl, bgl);
                     utils::PacketUtils::send_chat_message(const_cast<player::Player*>(&event.get_player()), balance_msg, false);
                     spdlog::info("[BALANCE-CONSOLE] Sent balance message to chat: {} WL ({} DL, {} BGL)", total_wl, dl, bgl);
                     pending_balance_on_inventory_ = false;
@@ -220,9 +221,14 @@ public:
 
                 
                 track_player_positions(event);
+                if (event.canceled) {
+                    return;
+                }
 
-                
                 handle_game_features(event);
+                if (event.canceled) {
+                    return;
+                }
 
                 
                 try {
@@ -310,7 +316,7 @@ private:
                 }
 
                 // Send Player Authentication console message
-                std::string auth_msg = "Player Authentication: `2Success.";
+                std::string auth_msg = "Player Authentication: `2Successful.";
                 utils::PacketUtils::send_chat_message(
                     const_cast<player::Player*>(&event.get_player()),
                     auth_msg,
@@ -326,7 +332,7 @@ private:
                 int total_wl = wl + dl * 100 + bgl * 10000;
                 
                 
-                std::string balance_msg = fmt::format("Balance: [ `#{} ā | `#{} `!DL | `#{} `eBGL`w ]]", total_wl, dl, bgl);
+                std::string balance_msg = fmt::format("Balance:`w [ `#{} ā `w| `#{} `!DL `w| `#{} `eBGL`w ]", total_wl, dl, bgl);
                 utils::PacketUtils::send_chat_message(
                     const_cast<player::Player*>(&event.get_player()),
                     balance_msg,
@@ -1252,6 +1258,10 @@ private:
     }
 
     void track_player_positions(const core::EventPacket& event) {
+        if (event.canceled) {
+            return;
+        }
+
         const auto& game_packet = event.get_packet();
         const auto& ext_data = event.get_ext_data();
         
@@ -1274,6 +1284,7 @@ private:
                 auto local_player = tracker.get_local_player();
                 if (local_player.netID > 0) {
                     tracker.update_player_position(local_player.netID, tank->vec_x, tank->vec_y);
+                    command::FindPathCommand::update_last_target_pos(tank->vec_x, tank->vec_y);
                 }
             }
         }
@@ -1318,17 +1329,24 @@ private:
                                 auto var_type = packet::Variant::get_type(variant.get_variants()[1]);
                                 if (var_type == packet::VariantType::VEC2) {
                                     glm::vec2 pos = variant.get<glm::vec2>(1);
+                                    
+                                    auto& tracker = utils::PlayerTracker::get_instance();
+                                    auto local_player = tracker.get_local_player();
+                                    bool is_local = (game_packet.net_id == static_cast<uint32_t>(-1) || 
+                                                     (local_player.netID > 0 && game_packet.net_id == local_player.netID));
+
+                                    if (is_local && command::FindPathCommand::should_suppress_onsetpos(pos.x, pos.y)) {
+                                        spdlog::info("[Anti-Rubberband] Suppressed PlayerTracker update for local player OnSetPos ({:.1f}, {:.1f})", pos.x, pos.y);
+                                        const_cast<core::EventPacket&>(event).canceled = true;
+                                        return;
+                                    }
+
                                     utils::PlayerTracker::get_instance().update_player_position(
                                         game_packet.net_id, pos.x, pos.y
                                     );
                                     
-                                    
-                                    
                                     int tile_x = static_cast<int>(pos.x / 32.0f);
                                     int tile_y = static_cast<int>(pos.y / 32.0f);
-                                    
-                                    auto& tracker = utils::PlayerTracker::get_instance();
-                                    auto local_player = tracker.get_local_player();
                                     
                                     
                                     if (local_player.netID == 0) {
@@ -1552,6 +1570,14 @@ private:
                             break;
                         }
 
+                        if (event.from == core::EventFrom::FromServer) {
+                            if (str_val.find("No access") != std::string::npos || str_val.find("no access") != std::string::npos) {
+                                utils::WorldManager::get_instance().set_server_reported_no_access(true);
+                            } else if (str_val.find("Access granted") != std::string::npos || str_val.find("access granted") != std::string::npos) {
+                                utils::WorldManager::get_instance().set_server_reported_no_access(false);
+                            }
+                        }
+
                         
                         try {
                             TextParse text_parse{ str_val };
@@ -1586,6 +1612,16 @@ private:
                             if (variant.size() > 0) {
                                 std::string function_name = variant.get<std::string>(0);
                                 if (function_name == "OnSetPos" || function_name == "OnSpawn") {
+                                    if (function_name == "OnSetPos") {
+                                        auto local_player = utils::PlayerTracker::get_instance().get_local_player();
+                                        bool is_local = (event.get_packet().net_id == static_cast<uint32_t>(-1) ||
+                                                         (local_player.netID > 0 && event.get_packet().net_id == local_player.netID));
+                                        if (is_local && command::FindPathCommand::should_suppress_onsetpos(vec2.x, vec2.y)) {
+                                            spdlog::info("[Anti-Rubberband] Suppressed parse_call_function update for local OnSetPos ({:.1f}, {:.1f})", vec2.x, vec2.y);
+                                            const_cast<core::EventPacket&>(event).canceled = true;
+                                            return;
+                                        }
+                                    }
                                     utils::PlayerTracker::get_instance().update_player_position(
                                         event.get_packet().net_id, vec2.x, vec2.y
                                     );
@@ -1860,6 +1896,10 @@ private:
                     }
                 }
                 
+                if (event.canceled) {
+                    return;
+                }
+
                 const EventCallFunction event_call_function{
                     event.get_player(),
                     event.get_target(),
@@ -1869,7 +1909,7 @@ private:
                 event_call_function.from = event.from;
 
                 event_dispatcher_.dispatch(event_call_function);
-                event.canceled = event_call_function.canceled;
+                event.canceled = event.canceled || event_call_function.canceled;
             }
         } catch (const std::exception& e) {
             spdlog::debug("Failed to dispatch variant event: {}", e.what());

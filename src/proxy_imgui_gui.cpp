@@ -34,6 +34,7 @@
 #include <cctype>
 #include <sstream>
 #include <fstream> 
+#include <atomic>
 #include <string_view>
 
 #pragma comment(lib, "d3d9.lib")
@@ -51,7 +52,40 @@ static LPDIRECT3D9           g_pD3D       = nullptr;
 static LPDIRECT3DDEVICE9     g_pd3dDevice = nullptr;
 static D3DPRESENT_PARAMETERS g_d3dpp      = {};
 static HWND                  g_hWnd       = nullptr;
+static std::atomic<bool>     g_gui_visible{ false };
+static std::chrono::steady_clock::time_point g_last_toggle_time{};
 static const int             g_hdrH       = 24;   
+
+void ShowGui(bool show) {
+    if (!g_hWnd) return;
+    g_gui_visible.store(show);
+    if (show) {
+        SetLayeredWindowAttributes(g_hWnd, 0, 235, LWA_ALPHA);
+        ShowWindow(g_hWnd, SW_RESTORE);
+        ShowWindow(g_hWnd, SW_SHOW);
+        SetWindowPos(g_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+        SetForegroundWindow(g_hWnd);
+        BringWindowToTop(g_hWnd);
+        UpdateWindow(g_hWnd);
+    } else {
+        ShowWindow(g_hWnd, SW_HIDE);
+    }
+}
+
+void ToggleGui() {
+    if (!g_hWnd) return;
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - g_last_toggle_time).count();
+    if (elapsed < 250) {
+        return; // Ignore any duplicate triggers within 250ms
+    }
+    g_last_toggle_time = now;
+    ShowGui(!g_gui_visible.load());
+}
+
+bool IsGuiVisible() {
+    return g_gui_visible.load();
+}
 
 
 struct LogEntry {
@@ -1250,6 +1284,10 @@ void ProxyImGuiGUI(bool* p_open) {
         ImGuiWindowFlags_NoBringToFrontOnFocus);
     ImGui::PopStyleVar(2);
 
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        ShowGui(false);
+    }
+
     
     ImVec2 wpos = ImGui::GetWindowPos();
     ImVec2 wsz  = ImGui::GetWindowSize();
@@ -1279,6 +1317,14 @@ void ProxyImGuiGUI(bool* p_open) {
     if (ImGui::Button("_", ImVec2(24,0)) && g_hWnd) {
         ShowWindow(g_hWnd, SW_MINIMIZE);
     }
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.60f, 0.15f, 0.15f, 0.85f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.20f, 0.20f, 1.00f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.95f, 0.10f, 0.10f, 1.00f));
+    if (ImGui::Button("X", ImVec2(24,0))) {
+        ShowGui(false);
+    }
+    ImGui::PopStyleColor(3);
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f,0.75f,1.00f,1.0f));
     ImGui::Text("  Vin Proxy Premium");
@@ -1417,7 +1463,7 @@ void RunImGuiApp() {
     HWND hwnd = CreateWindowEx(
         WS_EX_TOPMOST | WS_EX_LAYERED,
         wc.lpszClassName, _T("Vin Proxy Premium"),
-        WS_POPUP | WS_VISIBLE,
+        WS_POPUP,
         (sw-ww)/2, (sh-wh)/2, ww, wh,
         nullptr, nullptr, wc.hInstance, nullptr);
     g_hWnd = hwnd;
@@ -1433,11 +1479,19 @@ void RunImGuiApp() {
         return;
     }
 
-    ShowWindow(hwnd, SW_SHOWDEFAULT);
-    UpdateWindow(hwnd);
+    // Check if auto-show is configured (defaults to false)
+    bool auto_show = false;
+    if (g_proxy_get_fn) {
+        auto_show = (g_proxy_get_fn("gui.auto_show") == "true");
+    }
+    if (auto_show) {
+        ShowGui(true);
+    } else {
+        ShowWindow(hwnd, SW_HIDE);
+        g_gui_visible.store(false);
+    }
 
-    
-    SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
+    SetLayeredWindowAttributes(hwnd, 0, 235, LWA_ALPHA);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -1445,8 +1499,6 @@ void RunImGuiApp() {
     io.IniFilename = nullptr;  
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
-    
-    
     {
         ImFont* font = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\GOTHICB.TTF", 17.0f);
         if (!font) {
@@ -1459,25 +1511,37 @@ void RunImGuiApp() {
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX9_Init(g_pd3dDevice);
 
-    
-    float alpha = 0.f;
-    bool fading = true;
-
     bool show = true;
     MSG  msg  = {};
 
     while (msg.message != WM_QUIT) {
-        if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
-            continue;
+            if (msg.message == WM_QUIT) break;
+        }
+        if (msg.message == WM_QUIT) break;
+
+        // Clean rising-edge detection for Ctrl + G and INSERT hotkeys
+        {
+            static bool s_prev_ctrl_g = false;
+            static bool s_prev_ins = false;
+            bool ctrl_down = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+            bool g_down = (GetAsyncKeyState('G') & 0x8000) != 0;
+            bool ctrl_g = ctrl_down && g_down;
+            bool ins_down = (GetAsyncKeyState(VK_INSERT) & 0x8000) != 0;
+
+            if ((ctrl_g && !s_prev_ctrl_g) || (ins_down && !s_prev_ins)) {
+                ToggleGui();
+            }
+            s_prev_ctrl_g = ctrl_g;
+            s_prev_ins = ins_down;
         }
 
-        
-        if (fading) {
-            alpha += 0.07f;
-            if (alpha >= 1.0f) { alpha = 1.0f; fading = false; }
-            SetLayeredWindowAttributes(hwnd, 0, (BYTE)(alpha * 235), LWA_ALPHA);
+        // If GUI is hidden, sleep 20ms to conserve 100% GPU / CPU resources
+        if (!g_gui_visible.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            continue;
         }
 
         ImGui_ImplDX9_NewFrame();
@@ -1488,7 +1552,6 @@ void RunImGuiApp() {
 
         ImGui::EndFrame();
 
-        
         g_pd3dDevice->SetRenderState(D3DRS_ZENABLE, FALSE);
         g_pd3dDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
         g_pd3dDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
@@ -1506,7 +1569,10 @@ void RunImGuiApp() {
             g_pd3dDevice->TestCooperativeLevel() == D3DERR_DEVICENOTRESET)
             ResetDevice();
 
-        if (!show) break;
+        if (!show) {
+            ShowGui(false);
+            show = true;
+        }
     }
 
     ImGui_ImplDX9_Shutdown();
@@ -1548,6 +1614,9 @@ void ResetDevice() {
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wP, LPARAM lP) {
     if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wP, lP)) return TRUE;
     switch (msg) {
+    case WM_CLOSE:
+        ShowGui(false);
+        return 0;
     case WM_SIZE:
         if (g_pd3dDevice && wP != SIZE_MINIMIZED) {
             g_d3dpp.BackBufferWidth  = LOWORD(lP);

@@ -2,6 +2,8 @@
 #include "command_base.hpp"
 #include "../../core/core.hpp"
 #include <memory>
+#include <atomic>
+#include <thread>
 
 
 
@@ -59,7 +61,9 @@ public:
     static void handle_dialog_response(player::Player* player, const std::string& button_clicked, const std::string& dialog_data);
     static void apply_dialog_settings(const std::string& dialog_data);
 
-    
+    static bool should_suppress_onsetpos(float server_x, float server_y);
+    static bool is_sync_in_progress();
+    static void update_last_target_pos(float px, float py);
     static int run_path(client::Client* client, uint32_t target_x, uint32_t target_y, bool show_console, int delay_ms = -1, uint64_t path_id = 0);
     
 private:
@@ -68,8 +72,11 @@ private:
     static int s_cooldown_ms;
     static std::chrono::steady_clock::time_point s_last_tp_time;
     static std::atomic<uint64_t> s_current_path_id;
+    static std::atomic<bool> s_sync_in_progress;
     static uint32_t s_last_click_tile_x;
     static uint32_t s_last_click_tile_y;
+    static float s_last_target_px;
+    static float s_last_target_py;
 };
 
 class PlayerTPCommand : public CommandBase {

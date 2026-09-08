@@ -63,6 +63,7 @@ struct Tile {
     uint16_t bg = 0;
     uint16_t parent_index = 0;
     uint16_t flags = 0;
+    uint16_t lock_index = 0;
     uint8_t extra_type = 0;
     
     

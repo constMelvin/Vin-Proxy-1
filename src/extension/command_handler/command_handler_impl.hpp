@@ -764,12 +764,7 @@ private:
             spdlog::info("[CHAT] Raw command from client: '{}' (len={})", command_source, command_source.length());
             spdlog::info("[CHAT] After substr(1) and trim: '{}' (len={})", command_text, command_text.length());
             
-            if (command_text == "gui" || command_text == "menu" || command_text == "interface") {
-                send_gui_to_player(const_cast<player::Player*>(&event.get_player()), "main");
-                event.canceled = true;
-                return;
-            }
-            else if (command_text == "info") {
+            if (command_text == "info") {
                 send_gui_to_player(const_cast<player::Player*>(&event.get_player()), "info");
                 event.canceled = true;
                 return;
@@ -825,6 +820,30 @@ private:
     }
 
     void handle_dialog_response(const core::EventPacket& event) {
+        if (event.from == core::EventFrom::FromServer) {
+            const auto& game_packet = event.get_packet();
+            if (game_packet.type == packet::PACKET_CALL_FUNCTION) {
+                const auto& ext_data = event.get_ext_data();
+                if (!ext_data.empty()) {
+                    packet::Variant variant{};
+                    if (variant.deserialize(ext_data) && variant.size() > 1) {
+                        std::string function_name = variant.get<std::string>(0);
+                        if (function_name == "OnSetPos") {
+                            auto var_type = packet::Variant::get_type(variant.get_variants()[1]);
+                            if (var_type == packet::VariantType::VEC2) {
+                                glm::vec2 pos = variant.get<glm::vec2>(1);
+                                if (command::FindPathCommand::should_suppress_onsetpos(pos.x, pos.y)) {
+                                    const_cast<core::EventPacket&>(event).canceled = true;
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
         if (event.from != core::EventFrom::FromClient) {
             return;
         }
@@ -843,10 +862,21 @@ private:
                      ((GetKeyState(VK_RSHIFT) & 0x8000) != 0);
 #endif
 
+        // If server position sync for shift-click teleport is actively in progress,
+        // absorb normal client movement (PACKET_STATE) so client packets don't interleave
+        // with or corrupt the proxy's server synchronization stream.
+        if (command::FindPathCommand::is_sync_in_progress() && !shift_held) {
+            if (game_packet.type == packet::PACKET_STATE) {
+                const_cast<core::EventPacket&>(event).canceled = true;
+                return;
+            }
+        }
+
         if (shift_held) {
             bool is_click_packet = (game_packet.type == packet::PACKET_TILE_CHANGE_REQUEST ||
                                     game_packet.type == packet::PACKET_TILE_ACTIVATE_REQUEST ||
                                     game_packet.type == packet::PACKET_ITEM_ACTIVATE_REQUEST ||
+                                    game_packet.type == packet::PACKET_TILE_APPLY_DAMAGE ||
                                     game_packet.type == packet::PACKET_STATE);
 
             if (is_click_packet) {
@@ -879,6 +909,34 @@ private:
                         if (client && command::FindPathCommand::handle_shift_click(client, static_cast<uint32_t>(tx), static_cast<uint32_t>(ty))) {
                             const_cast<core::EventPacket&>(event).canceled = true;
                             return;
+                        }
+                    }
+                }
+            }
+        } else {
+            // When Shift is NOT held, block distant punches unless /mstate or /sm is explicitly enabled
+            bool is_tile_action = (game_packet.type == packet::PACKET_TILE_CHANGE_REQUEST ||
+                                   game_packet.type == packet::PACKET_TILE_APPLY_DAMAGE);
+            if (is_tile_action && !command::MstateCommand::is_mstate_enabled() && !command::SmCommand::is_sm_enabled()) {
+                const packet::TankUpdatePacket* tank = nullptr;
+                if (ext_data.size() >= sizeof(packet::TankUpdatePacket)) {
+                    tank = reinterpret_cast<const packet::TankUpdatePacket*>(ext_data.data());
+                } else {
+                    tank = reinterpret_cast<const packet::TankUpdatePacket*>(&game_packet);
+                }
+                if (tank && tank->int_x >= 0 && tank->int_y >= 0) {
+                    auto local = utils::PlayerTracker::get_instance().get_local_player();
+                    if (local.netID > 0) {
+                        auto ppos = utils::PlayerTracker::get_instance().get_player_position(local.netID);
+                        if (ppos.x > 0.0f || ppos.y > 0.0f) {
+                            float px = ppos.x / 32.0f;
+                            float py = ppos.y / 32.0f;
+                            float dx = static_cast<float>(tank->int_x) - px;
+                            float dy = static_cast<float>(tank->int_y) - py;
+                            if ((dx * dx + dy * dy) > 12.0f) {
+                                const_cast<core::EventPacket&>(event).canceled = true;
+                                return;
+                            }
                         }
                     }
                 }

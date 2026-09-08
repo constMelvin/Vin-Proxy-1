@@ -61,6 +61,9 @@ std::chrono::steady_clock::time_point FindPathCommand::s_last_tp_time{};
 std::atomic<uint64_t> FindPathCommand::s_current_path_id{0};
 uint32_t FindPathCommand::s_last_click_tile_x{0};
 uint32_t FindPathCommand::s_last_click_tile_y{0};
+float FindPathCommand::s_last_target_px = -1.0f;
+float FindPathCommand::s_last_target_py = -1.0f;
+std::atomic<bool> FindPathCommand::s_sync_in_progress{false};
 core::Core* PlayerTPCommand::s_core = nullptr;
 core::Core* FlagCommand::s_core = nullptr;
 core::Core* InvisCommand::s_core = nullptr;
@@ -132,9 +135,7 @@ void send_generic(player::Player* p, const std::string& raw) {
 static extension::item_finder::ItemDatabase* g_path_item_db = nullptr;
 
 static bool is_lock_id(uint16_t item_id) {
-    return (item_id == 202 || item_id == 204 || item_id == 206 || item_id == 242 || 
-            item_id == 1796 || item_id == 2408 || item_id == 4994 || item_id == 7188 || 
-            item_id == 8468 || item_id == 11550 || item_id == 4992);
+    return utils::is_any_lock_item(item_id);
 }
 
 static bool is_jammer_id(uint16_t item_id) {
@@ -168,14 +169,12 @@ static bool is_solid_item(uint16_t item_id) {
     if (g_path_item_db) {
         const auto* info = g_path_item_db->get_item_by_id(static_cast<int>(item_id));
         if (info) {
-            // collision_type 1 = solid block in Growtopia's items.dat
-            if (info->collision_type == 1) {
+            // collision_type 1 = solid block, 6 = deadly hazard (spikes, lava)
+            if (info->collision_type == 1 || info->collision_type == 6) {
                 return true;
             }
-            // collision_type 0, 2, 3, 4+ = not solid (passable for teleport)
-            if (info->collision_type != 1) {
-                return false;
-            }
+            // collision_type 0, 2, 3, 4, 5+ = passable in Growtopia (trees, doors, signs, platforms, etc.)
+            return false;
         }
     }
 
@@ -218,34 +217,288 @@ static bool is_tile_solid(uint32_t tile_x, uint32_t tile_y) {
         return false;
     }
 
-    const auto world_v2 = world_mgr.get_world_v2();
-    if (world_v2.is_valid && !world_v2.tiles.empty()) {
-        size_t idx = static_cast<size_t>(tile_y) * width + tile_x;
-        if (idx < world_v2.tiles.size()) {
-            const auto& t = world_v2.tiles[idx];
-            // Air (0), Punch (18), Seeds (odd IDs)
-            if (t.fg == 0 || t.fg == 18 || (t.fg % 2 != 0)) {
-                return false;
-            }
-            // Locks and Jammers in Growtopia are ALWAYS SOLID
-            if (t.is_lock() || is_lock_id(t.fg) || is_jammer_id(t.fg)) {
+    uint16_t fg = world_mgr.get_tile_fg(tile_x, tile_y);
+    // Air (0), Punch (18), Seeds (odd IDs)
+    if (fg == 0 || fg == 18 || (fg % 2 != 0)) {
+        return false;
+    }
+    // Locks and Jammers in Growtopia are ALWAYS SOLID
+    if (is_lock_id(fg) || is_jammer_id(fg)) {
+        return true;
+    }
+    // Weather Machines are ALWAYS PASSABLE
+    if (is_weather_machine_id(fg)) {
+        return false;
+    }
+    return is_deadly_or_solid_tile(fg);
+}
+
+static bool is_platform_id(uint16_t item_id) {
+    return (item_id == 382 || item_id == 452 || item_id == 756 || item_id == 928 || 
+            item_id == 1114 || item_id == 1558 || item_id == 3230);
+}
+
+static bool is_tile_standable(uint32_t tile_x, uint32_t tile_y) {
+    auto& world_mgr = utils::WorldManager::get_instance();
+    uint32_t width = world_mgr.get_world_width();
+    uint32_t height = world_mgr.get_world_height();
+    if (width == 0 || height == 0 || tile_x >= width || tile_y >= height) {
+        return false;
+    }
+
+    uint16_t fg = world_mgr.get_tile_fg(tile_x, tile_y);
+    if (is_platform_id(fg)) {
+        return true;
+    }
+    return is_tile_solid(tile_x, tile_y);
+}
+
+static bool is_entrance_gate_item(uint16_t item_id) {
+    if (item_id == 0 || item_id == 18 || (item_id % 2 != 0)) {
+        return false;
+    }
+
+    // Known Entrance Gates & Doors in Growtopia
+    switch (item_id) {
+        case 60:    // Portcullis
+        case 224:   // House Entrance
+        case 552:   // Secret Passage
+        case 598:   // Dragon Gate
+        case 686:   // Jail Door
+        case 972:   // Ancient Stone Gate
+        case 1162:  // Forcefield
+        case 2810:  // Air Vent
+        case 3126:  // Dark Magic Barrier
+        case 3798:  // VIP Entrance
+        case 4240:  // Jade Portcullis
+        case 4352:  // Wolf Gate
+        case 4710:  // Adventure Idol Gate
+        case 4744:  // Adventure Tomb Gate
+        case 4834:  // Team Entrance - Punch
+        case 4836:  // Team Entrance - Grow
+        case 4838:  // Team Entrance - Build
+        case 5036:  // Hidden Door
+        case 5748:  // Coin Door
+        case 5818:  // Guild Entrance - Normal
+        case 5820:  // Guild Entrance - Ornate
+        case 7066:  // Growtorial Entrance
+        case 7164:  // Red House Entrance
+        case 7860:  // Baroque Iron Gate
+        case 10060: // Creepy Baby Gate
+        case 11138: // Friends Entrance
+        case 12982: // Turkey Fight Entrance
+            return true;
+        default:
+            break;
+    }
+
+    // Check item database: collision_type 3 is Gateway / Entrance in Growtopia
+    if (g_path_item_db) {
+        const auto* info = g_path_item_db->get_item_by_id(static_cast<int>(item_id));
+        if (info) {
+            if (info->collision_type == 3) {
                 return true;
             }
-            // Weather Machines (extra_type == 34) are ALWAYS PASSABLE
-            if (t.extra_type == 34 || is_weather_machine_id(t.fg)) {
-                return false;
+            std::string name_lower = info->name;
+            std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
+            if (name_lower.find("gate") != std::string::npos || 
+                name_lower.find("entrance") != std::string::npos || 
+                name_lower.find("portcullis") != std::string::npos) {
+                if (name_lower.find("seed") == std::string::npos && 
+                    name_lower.find("alligator") == std::string::npos &&
+                    name_lower.find("investigator") == std::string::npos &&
+                    name_lower.find("aggregate") == std::string::npos) {
+                    return true;
+                }
             }
-            return is_deadly_or_solid_tile(t.fg);
         }
     }
 
-    const auto& tiles = world_mgr.get_tiles();
-    size_t idx = static_cast<size_t>(tile_y) * width + tile_x;
-    if (idx < tiles.size()) {
-        uint16_t fg = tiles[idx].Fg;
-        return is_deadly_or_solid_tile(fg);
-    }
     return false;
+}
+
+enum class TileBlockReason {
+    PASSABLE,
+    OUT_OF_BOUNDS,
+    SOLID_BLOCK,
+    GATE_NOT_PUBLIC,
+    LOCK_SPOT,
+    NO_LOCK_ACCESS,
+    NO_PATH_WITHOUT_ACCESS
+};
+
+static bool is_tile_passable_for_reachability(uint32_t x, uint32_t y, uint32_t user_id) {
+    auto& world_mgr = utils::WorldManager::get_instance();
+    uint32_t width = world_mgr.get_world_width();
+    uint32_t height = world_mgr.get_world_height();
+    if (x >= width || y >= height) return false;
+
+    // Direct solid block / hazard / jammer check
+    if (is_tile_solid(x, y)) return false;
+
+    // Lock items are always solid
+    uint16_t fg = world_mgr.get_tile_fg(x, y);
+    if (utils::is_any_lock_item(fg) || world_mgr.is_tile_lock(x, y)) return false;
+
+    // Entrance gates (check if passable/open)
+    if (is_entrance_gate_item(fg)) {
+        if (!world_mgr.can_player_teleport_on_gate(x, y, user_id)) {
+            return false; // Closed gate blocks movement
+        }
+    }
+
+    // Area locks (Small Lock 202, Big Lock 204, Huge Lock 206)
+    // If the tile is covered by an area lock and player has no access, it blocks passage
+    const auto* area_lock = world_mgr.get_area_lock(x, y);
+    if (area_lock != nullptr) {
+        if (!world_mgr.has_tile_lock_access(x, y, user_id)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool is_path_reachable_without_access(uint32_t start_x, uint32_t start_y, uint32_t target_x, uint32_t target_y, uint32_t user_id) {
+    auto& world_mgr = utils::WorldManager::get_instance();
+    uint32_t width = world_mgr.get_world_width();
+    uint32_t height = world_mgr.get_world_height();
+    if (width == 0 || height == 0 || start_x >= width || start_y >= height || target_x >= width || target_y >= height) {
+        return false;
+    }
+
+    if (start_x == target_x && start_y == target_y) {
+        return true;
+    }
+
+    // If target itself is not passable, it is not reachable
+    if (!is_tile_passable_for_reachability(target_x, target_y, user_id)) {
+        return false;
+    }
+
+    size_t total_tiles = static_cast<size_t>(width) * height;
+    std::vector<uint8_t> visited(total_tiles, 0);
+    std::vector<uint32_t> queue;
+    queue.reserve(1024);
+
+    uint32_t start_idx = start_y * width + start_x;
+    visited[start_idx] = 1;
+    queue.push_back(start_idx);
+
+    size_t head = 0;
+    const int dx[] = { 0, 0, -1, 1, -1, 1, -1, 1 };
+    const int dy[] = { -1, 1, 0, 0, -1, -1, 1, 1 };
+
+    while (head < queue.size()) {
+        uint32_t curr_idx = queue[head++];
+        uint32_t cx = curr_idx % width;
+        uint32_t cy = curr_idx / width;
+
+        if (cx == target_x && cy == target_y) {
+            return true;
+        }
+
+        for (int i = 0; i < 8; ++i) {
+            int nx = static_cast<int>(cx) + dx[i];
+            int ny = static_cast<int>(cy) + dy[i];
+
+            if (nx < 0 || ny < 0 || static_cast<uint32_t>(nx) >= width || static_cast<uint32_t>(ny) >= height) {
+                continue;
+            }
+
+            // Diagonal corner squeeze check: do not allow squeezing diagonally through two corner-touching solid blocks
+            if (i >= 4) {
+                bool adj1 = is_tile_passable_for_reachability(static_cast<uint32_t>(nx), cy, user_id);
+                bool adj2 = is_tile_passable_for_reachability(cx, static_cast<uint32_t>(ny), user_id);
+                if (!adj1 && !adj2) {
+                    continue;
+                }
+            }
+
+            uint32_t n_idx = static_cast<uint32_t>(ny) * width + static_cast<uint32_t>(nx);
+            if (!visited[n_idx]) {
+                visited[n_idx] = 1;
+                if (is_tile_passable_for_reachability(static_cast<uint32_t>(nx), static_cast<uint32_t>(ny), user_id)) {
+                    if (static_cast<uint32_t>(nx) == target_x && static_cast<uint32_t>(ny) == target_y) {
+                        return true;
+                    }
+                    queue.push_back(n_idx);
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+static TileBlockReason check_tile_blocked(uint32_t tile_x, uint32_t tile_y, uint32_t cur_tx, uint32_t cur_ty) {
+    auto& world_mgr = utils::WorldManager::get_instance();
+    uint32_t width = world_mgr.get_world_width();
+    uint32_t height = world_mgr.get_world_height();
+    if (width == 0 || height == 0 || tile_x >= width || tile_y >= height) {
+        return TileBlockReason::OUT_OF_BOUNDS;
+    }
+
+    uint16_t fg = world_mgr.get_tile_fg(tile_x, tile_y);
+
+    // 1. Prevent teleporting directly onto a lock spot (Small/Big/Huge/World lock block)
+    if (utils::is_any_lock_item(fg) || world_mgr.is_tile_lock(tile_x, tile_y)) {
+        return TileBlockReason::LOCK_SPOT;
+    }
+
+    // 2. Only block if the tile is genuinely a solid block / jammer / hazard
+    // Background walls, dropped items, trees/seeds, platforms, doors, and all passable items are completely ALLOWED!
+    if (is_tile_solid(tile_x, tile_y)) {
+        return TileBlockReason::SOLID_BLOCK;
+    }
+
+    // 3. Get local player user ID for access verification
+    auto local = utils::PlayerTracker::get_instance().get_local_player();
+    uint32_t user_id = local.userID;
+    if (user_id == 0) {
+        for (const auto& [nid, p] : utils::PlayerTracker::get_instance().get_all_players()) {
+            if (p.is_local && p.userID != 0) {
+                user_id = p.userID;
+                break;
+            }
+        }
+    }
+
+    // 4. Check all types of entrance gates:
+    if (is_entrance_gate_item(fg)) {
+        bool can_tp = world_mgr.can_player_teleport_on_gate(tile_x, tile_y, user_id);
+        spdlog::info("[GATE ACCESS CHECK] tile=({},{}) fg={} user_id={} can_tp={}",
+            tile_x, tile_y, fg, user_id, can_tp);
+
+        if (can_tp) {
+            return TileBlockReason::PASSABLE;
+        }
+        return TileBlockReason::GATE_NOT_PUBLIC;
+    }
+
+    // 5. Check private area lock access (Small Lock 202, Big Lock 204, Huge Lock 206)
+    // Prevent entering a private locked area without access
+    if (!world_mgr.can_player_access_area_lock(tile_x, tile_y, cur_tx, cur_ty, user_id)) {
+        spdlog::info("[AREA LOCK ACCESS BLOCKED] tile=({},{}) fg={} user_id={} cur=({},{})", 
+            tile_x, tile_y, fg, user_id, cur_tx, cur_ty);
+        return TileBlockReason::NO_LOCK_ACCESS;
+    }
+
+    // 6. World access and reachability check:
+    // If world is locked and player does NOT have access (world owner or admin),
+    // teleporting through solid blocks / walls / blocked spawn door causes server rubberbanding (anti-cheat).
+    // An open passable path must connect current position to destination!
+    bool is_locked = world_mgr.is_world_locked();
+    bool has_access = world_mgr.has_world_access(user_id);
+    if (is_locked && !has_access) {
+        if (!is_path_reachable_without_access(cur_tx, cur_ty, tile_x, tile_y, user_id)) {
+            spdlog::info("[PATH BLOCKED WITHOUT ACCESS] tile=({},{}) cur=({},{}) user_id={}",
+                tile_x, tile_y, cur_tx, cur_ty, user_id);
+            return TileBlockReason::NO_PATH_WITHOUT_ACCESS;
+        }
+    }
+
+    return TileBlockReason::PASSABLE;
 }
 
 FindPathCommand::FindPathCommand() : CommandBase(
@@ -261,6 +514,10 @@ std::unique_ptr<CommandBase> FindPathCommand::clone() const {
 
 void FindPathCommand::set_core(core::Core* core) {
     s_core = core;
+    if (s_core) {
+        s_click_mode_enabled = s_core->get_config().get<bool>("pathfind.enabled", true);
+        s_cooldown_ms = s_core->get_config().get<int>("pathfind.cooldown_ms", 2000);
+    }
 }
 
 void FindPathCommand::set_item_database(extension::item_finder::ItemDatabase* database) {
@@ -279,6 +536,10 @@ void FindPathCommand::toggle_click_mode() {
     if (s_core && s_core->get_server() && s_core->get_server()->get_player()) {
         send_console(s_core->get_server()->get_player(), msg);
     }
+    if (s_core) {
+        s_core->get_config().set<bool>("pathfind.enabled", s_click_mode_enabled);
+        s_core->get_config().save();
+    }
     spdlog::info("[ClickMode] {}", msg);
 }
 
@@ -287,8 +548,63 @@ int FindPathCommand::get_cooldown_ms() {
 }
 
 void FindPathCommand::set_cooldown_ms(int ms) {
-    s_cooldown_ms = std::clamp(ms, 100, 10000);
+    if (ms <= 0) {
+        s_cooldown_ms = 0;
+    } else {
+        s_cooldown_ms = std::clamp(ms, 100, 10000);
+    }
+    if (s_core) {
+        s_core->get_config().set<int>("pathfind.cooldown_ms", s_cooldown_ms);
+        s_core->get_config().save();
+    }
 }
+
+bool FindPathCommand::is_sync_in_progress() {
+    return s_sync_in_progress.load();
+}
+
+bool FindPathCommand::should_suppress_onsetpos(float server_x, float server_y) {
+    if (s_last_target_px < 0.0f || s_last_target_py < 0.0f) {
+        return false;
+    }
+
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - s_last_tp_time).count();
+
+    // Suppress if sync is actively running OR within 5000ms following teleport completion
+    if (!s_sync_in_progress.load() && elapsed > 5000) {
+        return false;
+    }
+
+    // If server's OnSetPos is attempting to pull player away from target (> 4px)
+    float dx = server_x - s_last_target_px;
+    float dy = server_y - s_last_target_py;
+    float dist_sq = dx * dx + dy * dy;
+
+    if (dist_sq > (4.0f * 4.0f)) {
+        spdlog::info("[Anti-Rubberband] Blocked server OnSetPos snapback ({:.1f}, {:.1f}) -> target was ({:.1f}, {:.1f}) [dist={:.1f}px, elapsed={}ms]",
+            server_x, server_y, s_last_target_px, s_last_target_py, std::sqrt(dist_sq), elapsed);
+        return true;
+    }
+
+    return false;
+}
+
+void FindPathCommand::update_last_target_pos(float px, float py) {
+    if (s_sync_in_progress.load()) return;
+    if (s_last_target_px < 0.0f || s_last_target_py < 0.0f) return;
+
+    float dx = px - s_last_target_px;
+    float dy = py - s_last_target_py;
+    float dist_sq = dx * dx + dy * dy;
+
+    if (dist_sq < (160.0f * 160.0f)) {
+        s_last_target_px = px;
+        s_last_target_py = py;
+    }
+}
+
+static constexpr int SAFETY_DELAY_MS = 2000;
 
 void FindPathCommand::show_settings_dialog(player::Player* player) {
     if (!player) return;
@@ -297,6 +613,12 @@ void FindPathCommand::show_settings_dialog(player::Player* player) {
     std::string status_color = s_click_mode_enabled ? "`2" : "`4";
     std::string status_text = s_click_mode_enabled ? "ON" : "OFF";
 
+    bool delay_active = (s_cooldown_ms > 0);
+    std::string is_delay_str = delay_active ? "1" : "0";
+    std::string delay_status = delay_active 
+        ? fmt::format("`2Safety Delay Active ({}ms / 2.0s)``", s_cooldown_ms) 
+        : "`4No Delay (Instant Teleport)``";
+
     std::string dialog = 
         "set_default_color|`o\n"
         "add_label_with_icon|big|`wPathfinding Settings``|left|32|\n"
@@ -304,12 +626,13 @@ void FindPathCommand::show_settings_dialog(player::Player* player) {
         "add_textbox|`oCurrent Status: " + status_color + status_text + "``|left|\n"
         "add_checkbox|pathfind_enable|`oEnable Pathfinding|" + is_enabled_str + "|\n"
         "add_spacer|small|\n"
-        "add_textbox|`oCooldown delay between teleports (100-10000ms):``|left|\n"
-        "add_text_input|pathfind_delay|Delay (ms):|" + std::to_string(s_cooldown_ms) + "|6|\n"
+        "add_textbox|`4WARNING: Teleport is bannable!``|left|\n"
+        "add_textbox|`oInstant teleport without delay increases server ban risk. Use safety delay to reduce ban risk.``|left|\n"
+        "add_spacer|small|\n"
+        "add_checkbox|pathfind_delay_enable|`oEnable Pathfinding Delay (2s Safety Delay)|" + is_delay_str + "|\n"
+        "add_textbox|`oCurrent Mode: " + delay_status + "|left|\n"
         "add_spacer|small|\n"
         "add_button|apply_pathfind|`2Apply Settings``|\n"
-        "add_button|back_pathfind|`5Back to Main``|\n"
-        "add_quick_exit|\n"
         "end_dialog|pathfind_gui|Close||";
 
     packet::Variant var{};
@@ -356,22 +679,29 @@ void FindPathCommand::apply_dialog_settings(const std::string& dialog_data) {
         s_click_mode_enabled = (enable_val == "1");
     }
 
-    // 2. Apply Cooldown Delay input
-    std::string delay_str = tp.get("pathfind_delay");
-    if (!delay_str.empty()) {
-        try {
-            int delay = std::stoi(delay_str);
-            set_cooldown_ms(delay);
-        } catch (...) {
-            spdlog::warn("[PathGUI] Invalid delay value: {}", delay_str);
-        }
+    // 2. Apply Pathfinding Delay checkbox state:
+    // If checked -> safety delay (2000ms / 2.0s). If unchecked -> 0ms (no delay / instant).
+    std::string delay_val = tp.get("pathfind_delay_enable");
+    if (!delay_val.empty()) {
+        bool delay_enabled = (delay_val == "1");
+        s_cooldown_ms = delay_enabled ? SAFETY_DELAY_MS : 0;
     }
 
-    // 3. Send console confirmation message
+    // 3. Save to config.json
+    if (s_core) {
+        s_core->get_config().set<bool>("pathfind.enabled", s_click_mode_enabled);
+        s_core->get_config().set<int>("pathfind.cooldown_ms", s_cooldown_ms);
+        s_core->get_config().save();
+    }
+
+    // 4. Send console confirmation message
     std::string status_str = s_click_mode_enabled ? "`2ON" : "`4OFF";
+    std::string delay_str = (s_cooldown_ms > 0) 
+        ? fmt::format("`2Safety Delay ({}ms / 2.0s)", s_cooldown_ms) 
+        : "`4No Delay (Instant)";
     if (s_core && s_core->get_server() && s_core->get_server()->get_player()) {
         send_console(s_core->get_server()->get_player(), 
-            fmt::format("`2Pathfinding settings applied! Status: {}`2, Cooldown: `b{}ms`2.", status_str, s_cooldown_ms));
+            fmt::format("`2Pathfinding settings applied! Status: {}`2, Delay: {}`2.", status_str, delay_str));
     }
     spdlog::info("[PathGUI] Settings applied: enabled={}, cooldown={}ms", s_click_mode_enabled, s_cooldown_ms);
 }
@@ -588,49 +918,24 @@ bool FindPathCommand::handle_shift_click(client::Client* client, uint32_t tile_x
     auto now = std::chrono::steady_clock::now();
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - s_last_tp_time).count();
 
-    // Ignore duplicate packets sent by GT client for the same single click
-    if (tile_x == s_last_click_tile_x && tile_y == s_last_click_tile_y && elapsed_ms < 150) {
+    // Ignore duplicate packets sent by GT client for the same single click within 50ms
+    if (tile_x == s_last_click_tile_x && tile_y == s_last_click_tile_y && elapsed_ms < 50) {
         return true;
     }
 
-    // Cooldown to prevent rapid clicking
-    if (elapsed_ms < s_cooldown_ms) {
+    // Cooldown check between new clicks: only enforce if cooldown is explicitly configured > 0
+    if (s_cooldown_ms > 0 && elapsed_ms < s_cooldown_ms) {
         send_overlay(server->get_player(), "`6Waiting for next Pathfinding.");
         return true;
     }
 
-    // Solid Block Detector
-    if (is_tile_solid(tile_x, tile_y)) {
-        send_overlay(server->get_player(), "`4Teleport cancelled: target is a solid block!");
-        return true;
-    }
-
-    s_last_click_tile_x = tile_x;
-    s_last_click_tile_y = tile_y;
-    s_last_tp_time = now;
-
-    auto local = utils::PlayerTracker::get_instance().get_local_player();
-    uint32_t netid = local.netID;
-    const float target_px = static_cast<float>(tile_x * 32);
-    const float target_py = static_cast<float>(tile_y * 32);
-
-    // Calculate blocks traveled from current position
+    // Retrieve current position first so we can check current position vs target lock
     float cur_px = 0.0f, cur_py = 0.0f;
     bool has_pos = false;
 
-    // Try config first (most reliable)
-    std::string pos_x_str = s_core->get_config().get<std::string>("player.position.x");
-    std::string pos_y_str = s_core->get_config().get<std::string>("player.position.y");
-    try {
-        if (!pos_x_str.empty() && !pos_y_str.empty()) {
-            cur_px = std::stof(pos_x_str);
-            cur_py = std::stof(pos_y_str);
-            if (cur_px > 0.0f || cur_py > 0.0f) has_pos = true;
-        }
-    } catch (...) {}
-
-    // Fallback to player tracker
-    if (!has_pos && netid > 0) {
+    auto local = utils::PlayerTracker::get_instance().get_local_player();
+    uint32_t netid = local.netID;
+    if (netid > 0) {
         auto ppos = utils::PlayerTracker::get_instance().get_player_position(netid);
         if (ppos.x > 0.0f || ppos.y > 0.0f) {
             cur_px = ppos.x;
@@ -639,55 +944,138 @@ bool FindPathCommand::handle_shift_click(client::Client* client, uint32_t tile_x
         }
     }
 
-    uint32_t blocks = 0;
-    if (has_pos) {
-        uint32_t cur_tx = static_cast<uint32_t>(cur_px / 32.0f);
-        uint32_t cur_ty = static_cast<uint32_t>(cur_py / 32.0f);
-        int32_t dx = static_cast<int32_t>(tile_x) - static_cast<int32_t>(cur_tx);
-        int32_t dy = static_cast<int32_t>(tile_y) - static_cast<int32_t>(cur_ty);
-        blocks = static_cast<uint32_t>(std::abs(dx) + std::abs(dy));
+    if (!has_pos && s_core) {
+        std::string pos_x_str = s_core->get_config().get<std::string>("player.position.x");
+        std::string pos_y_str = s_core->get_config().get<std::string>("player.position.y");
+        try {
+            if (!pos_x_str.empty() && !pos_y_str.empty()) {
+                cur_px = std::stof(pos_x_str);
+                cur_py = std::stof(pos_y_str);
+                if (cur_px > 0.0f || cur_py > 0.0f) has_pos = true;
+            }
+        } catch (...) {}
     }
 
-    // 1. Instantly update client visual position so character moves immediately on screen
-    auto tp_start = std::chrono::steady_clock::now();
-
-    SetPosCommand::set_position(server->get_player(), netid, target_px, target_py);
-
-    // 2. Update player tracker position to target coordinates
-    if (netid > 0) {
-        utils::PlayerTracker::get_instance().update_player_position(netid, target_px, target_py);
+    if (!has_pos) {
+        cur_px = static_cast<float>(tile_x * 32);
+        cur_py = static_cast<float>(tile_y * 32);
     }
 
-    // 3. Send state packet to real server with dynamic ground physics flag
-    bool ground_below = is_tile_solid(tile_x, tile_y + 1);
+    uint32_t start_tx = static_cast<uint32_t>(cur_px / 32.0f);
+    uint32_t start_ty = static_cast<uint32_t>(cur_py / 32.0f);
 
-    MoriStatePacket tank_pkt{};
-    tank_pkt.type = static_cast<uint8_t>(packet::PACKET_STATE);
-    tank_pkt.net_id = netid;
-    tank_pkt.vector_x = target_px;
-    tank_pkt.vector_y = target_py + 2.0f;
-    tank_pkt.int_x = -1;
-    tank_pkt.int_y = -1;
-    tank_pkt.flags = ground_below ? 0x1u : 0x0u;
+    if (start_tx == tile_x && start_ty == tile_y) {
+        return true;
+    }
+
+    uint16_t debug_fg = utils::WorldManager::get_instance().get_tile_fg(tile_x, tile_y);
+    bool debug_solid = is_tile_solid(tile_x, tile_y);
+    spdlog::info("[SHIFT-CLICK CHECK] tile=({},{}) cur=({},{}) fg={} solid={}", 
+        tile_x, tile_y, start_tx, start_ty, debug_fg, debug_solid);
+
+    // Prevent teleport if target spot is not passable, a solid block, a lock spot, or locked without access
+    auto block_reason = check_tile_blocked(tile_x, tile_y, start_tx, start_ty);
+    if (block_reason != TileBlockReason::PASSABLE) {
+        spdlog::info("[SHIFT-CLICK CANCELLED] tile=({},{}) reason={}", tile_x, tile_y, static_cast<int>(block_reason));
+        switch (block_reason) {
+            case TileBlockReason::OUT_OF_BOUNDS:
+                send_overlay(server->get_player(), "`4Teleport cancelled: target is out of bounds!");
+                break;
+            case TileBlockReason::LOCK_SPOT:
+                send_overlay(server->get_player(), "`4Teleport cancelled: target spot is a lock!");
+                break;
+            case TileBlockReason::NO_LOCK_ACCESS:
+                send_overlay(server->get_player(), "`4Teleport cancelled: you don't have access to this lock!");
+                break;
+            case TileBlockReason::NO_PATH_WITHOUT_ACCESS:
+                send_overlay(server->get_player(), "`4Teleport cancelled: path is blocked and you have no access!");
+                break;
+            case TileBlockReason::GATE_NOT_PUBLIC:
+                send_overlay(server->get_player(), "`4Teleport cancelled: entrance gate is closed and you have no access!");
+                break;
+            case TileBlockReason::SOLID_BLOCK:
+                send_overlay(server->get_player(), "`4Teleport cancelled: target is a solid block!");
+                break;
+            default:
+                send_overlay(server->get_player(), "`4Teleport cancelled: target spot is not passable!");
+                break;
+        }
+        return true;
+    }
+
+    s_last_click_tile_x = tile_x;
+    s_last_click_tile_y = tile_y;
+    s_last_tp_time = now;
+
+    const float target_px = static_cast<float>(tile_x * 32);
+    const float target_py = static_cast<float>(tile_y * 32);
+
+    s_last_target_px = target_px;
+    s_last_target_py = target_py;
+
+    uint32_t active_netid = netid;
+    if (active_netid == 0) {
+        auto lp = utils::PlayerTracker::get_instance().get_local_player();
+        active_netid = lp.netID;
+    }
+
+    // 1. Instantly warp local camera and player sprite to destination
+    SetPosCommand::set_position(server->get_player(), static_cast<uint32_t>(-1), target_px, target_py);
+    if (active_netid > 0) {
+        SetPosCommand::set_position(server->get_player(), active_netid, target_px, target_py);
+        utils::PlayerTracker::get_instance().update_player_position(active_netid, target_px, target_py);
+    }
+
+    if (s_core) {
+        s_core->get_config().set<std::string>("player.position.x", std::to_string(target_px));
+        s_core->get_config().set<std::string>("player.position.y", std::to_string(target_py));
+        s_core->get_config().save();
+    }
+
+    // 2. Instantly send state packet to server with ground collision flag
+    bool ground_below = is_tile_standable(tile_x, tile_y + 1);
+
+    MoriStatePacket final_pkt{};
+    final_pkt.type = static_cast<uint8_t>(packet::PACKET_STATE);
+    final_pkt.object_type = 0;
+    final_pkt.jump_count = 0;
+    final_pkt.animation_type = 0;
+    final_pkt.net_id = active_netid;
+    final_pkt.target_net_id = 0;
+    final_pkt.vector_x = target_px;
+    final_pkt.vector_y = target_py + 2.0f;
+    final_pkt.vector_x2 = 0.0f;
+    final_pkt.vector_y2 = 0.0f;
+    final_pkt.int_x = -1;
+    final_pkt.int_y = -1;
+    final_pkt.extended_data_length = 0;
+    final_pkt.flags = ground_below ? (0x1u | packet::PACKET_FLAG_ON_SOLID) : 0x1u;
 
     ByteStream<std::uint16_t> bs{};
     bs.write(packet::NET_MESSAGE_GAME_PACKET);
-    bs.write(tank_pkt);
+    bs.write(final_pkt);
+
     if (client && client->get_player()) {
-        client->get_player()->send_packet_unreliable(bs.get_data(), 0);
+        client->get_player()->send_packet(bs.get_data(), 0);
     }
 
-    // 4. Re-send SetPos to local client to lock character position at destination
-    SetPosCommand::set_position(server->get_player(), netid, target_px, target_py);
+    // 3. Re-confirm local client position lock
+    SetPosCommand::set_position(server->get_player(), static_cast<uint32_t>(-1), target_px, target_py);
+    if (active_netid > 0) {
+        SetPosCommand::set_position(server->get_player(), active_netid, target_px, target_py);
+    }
 
-    auto tp_end = std::chrono::steady_clock::now();
-    double tp_secs = std::chrono::duration<double>(tp_end - tp_start).count();
+    uint32_t blocks = static_cast<uint32_t>(std::abs(static_cast<int>(tile_x) - static_cast<int>(start_tx)) + 
+                                           std::abs(static_cast<int>(tile_y) - static_cast<int>(start_ty)));
+    if (blocks == 0) blocks = 1;
 
-    // 5. Send overlay notification with travel distance and execution time
-    send_overlay(server->get_player(), fmt::format("`2Pathfinding to `6{} `wblocks. `6{:.2f} `wsecs.", blocks, tp_secs));
+    // 4. Send overlay notification with 0.00 secs instant execution
+    send_overlay(server->get_player(),
+        fmt::format("`2Pathfinding to `6{} `wblocks. `60.00 `wsecs.", blocks));
 
     return true;
 }
+
 
 void FindPathCommand::execute(client::Client* client, const std::vector<std::string>& args) {
     if (!s_core || !client || !client->get_player()) {
@@ -711,12 +1099,12 @@ void FindPathCommand::execute(client::Client* client, const std::vector<std::str
 
     if (arg1 == "enable" || arg1 == "on" || arg1 == "1") {
         s_click_mode_enabled = true;
-        send_console(server->get_player(), "`2Pathfinding enabled.");
+        send_console(server->get_player(), "`2Shift+Click teleport enabled.");
         return;
     }
     if (arg1 == "disable" || arg1 == "off" || arg1 == "0") {
         s_click_mode_enabled = false;
-        send_console(server->get_player(), "`4Pathfinding disabled.");
+        send_console(server->get_player(), "`4Shift+Click teleport disabled.");
         return;
     }
     if (arg1 == "toggle") {
@@ -724,17 +1112,29 @@ void FindPathCommand::execute(client::Client* client, const std::vector<std::str
         return;
     }
 
-    // Single numeric argument: e.g. /path 500 -> set cooldown delay to 500ms
-    if (args.size() == 2) {
-        try {
-            int delay = std::stoi(arg1);
-            set_cooldown_ms(delay);
-            send_console(server->get_player(), fmt::format("`2Pathfinding cooldown set to `b{}ms`2.", s_cooldown_ms));
-            return;
-        } catch (...) {
-            show_settings_dialog(server->get_player());
-            return;
+    if (arg1 == "delay") {
+        if (args.size() >= 3) {
+            std::string d_arg = args[2];
+            std::transform(d_arg.begin(), d_arg.end(), d_arg.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (d_arg == "on" || d_arg == "enable" || d_arg == "1") {
+                set_cooldown_ms(SAFETY_DELAY_MS);
+                send_console(server->get_player(), fmt::format("`2Pathfinding safety delay enabled: `b{}ms`2.", s_cooldown_ms));
+                return;
+            } else if (d_arg == "off" || d_arg == "disable" || d_arg == "0") {
+                set_cooldown_ms(0);
+                send_console(server->get_player(), "`4Pathfinding safety delay disabled (instant mode).");
+                return;
+            }
         }
+        // Toggle delay
+        if (s_cooldown_ms > 0) {
+            set_cooldown_ms(0);
+            send_console(server->get_player(), "`4Pathfinding safety delay disabled (instant mode).");
+        } else {
+            set_cooldown_ms(SAFETY_DELAY_MS);
+            send_console(server->get_player(), fmt::format("`2Pathfinding safety delay enabled: `b{}ms`2.", s_cooldown_ms));
+        }
+        return;
     }
 
     uint32_t target_x = 0, target_y = 0;
@@ -951,6 +1351,9 @@ std::unique_ptr<CommandBase> SmCommand::clone() const {
 
 void SmCommand::set_core(core::Core* core) {
     s_core = core;
+    if (s_core) {
+        s_sm_enabled = s_core->get_config().get<bool>("player.sm_enabled", false);
+    }
 }
 
 void SmCommand::execute(client::Client* client, const std::vector<std::string>& args) {
@@ -1702,6 +2105,9 @@ std::unique_ptr<CommandBase> MstateCommand::clone() const {
 
 void MstateCommand::set_core(core::Core* core) {
     s_core = core;
+    if (s_core) {
+        s_mstate_enabled = s_core->get_config().get<bool>("player.mstate_enabled", false);
+    }
 }
 
 void MstateCommand::execute(client::Client* client, const std::vector<std::string>& args) {

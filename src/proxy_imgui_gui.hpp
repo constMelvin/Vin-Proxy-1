@@ -11,6 +11,9 @@ namespace extension { namespace item_finder { class ItemDatabase; } }
 
 
 void RunImGuiApp();
+void ShowGui(bool show);
+void ToggleGui();
+bool IsGuiVisible();
 
 
 

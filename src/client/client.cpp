@@ -624,12 +624,37 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                     }
                                 };
                                 
+                                auto remove_field = [](std::string& data, const std::string& field) {
+                                    std::string search_pattern = field + "|";
+                                    size_t pos = data.find(search_pattern);
+                                    while (pos != std::string::npos) {
+                                        size_t end_pos = data.find('\n', pos);
+                                        if (end_pos != std::string::npos) {
+                                            data.erase(pos, (end_pos - pos) + 1);
+                                        } else {
+                                            data.erase(pos);
+                                        }
+                                        pos = data.find(search_pattern);
+                                    }
+                                };
+                                
                                 replace_or_add_field(modified_data, "country", "jp");
-                                bool invis_enabled = core_->get_config().get<bool>("player.invis_enabled");
+                                bool invis_enabled = core_->get_config().get<bool>("player.invis_enabled", false);
                                 replace_or_add_field(modified_data, "invis", invis_enabled ? "1" : "0");
-                                replace_or_add_field(modified_data, "mstate", "1");
-                                bool sm_enabled = core_->get_config().get<bool>("player.sm_enabled");
-                                replace_or_add_field(modified_data, "smstate", sm_enabled ? "1" : "0");
+                                
+                                bool mstate_enabled = core_->get_config().get<bool>("player.mstate_enabled", false);
+                                if (mstate_enabled) {
+                                    replace_or_add_field(modified_data, "mstate", "1");
+                                } else {
+                                    remove_field(modified_data, "mstate");
+                                }
+
+                                bool sm_enabled = core_->get_config().get<bool>("player.sm_enabled", false);
+                                if (sm_enabled) {
+                                    replace_or_add_field(modified_data, "smstate", "1");
+                                } else {
+                                    remove_field(modified_data, "smstate");
+                                }
                                 
                                 int title_icon = core_->get_config().get<int>("player.title_icon");
                                 if (title_icon > 0) {

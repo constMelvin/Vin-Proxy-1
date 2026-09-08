@@ -57,8 +57,22 @@ private:
             tank = reinterpret_cast<const packet::TankUpdatePacket*>(&game_packet);
         }
         
-        if (tank && game_packet.type == packet::PACKET_TILE_CHANGE_REQUEST) {
-            handle_tile_change(tank);
+#ifdef _WIN32
+        bool shift_held = ((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0) ||
+                          ((GetAsyncKeyState(VK_LSHIFT) & 0x8000) != 0) ||
+                          ((GetAsyncKeyState(VK_RSHIFT) & 0x8000) != 0) ||
+                          ((GetKeyState(VK_SHIFT) & 0x8000) != 0) ||
+                          ((GetKeyState(VK_LSHIFT) & 0x8000) != 0) ||
+                          ((GetKeyState(VK_RSHIFT) & 0x8000) != 0);
+#else
+        bool shift_held = false;
+#endif
+
+        if (tank && game_packet.type == packet::PACKET_TILE_CHANGE_REQUEST && !shift_held) {
+            uint16_t item_id = static_cast<uint16_t>(tank->int_data);
+            if (item_id != 18 && item_id != 0) {
+                handle_tile_change(tank);
+            }
         }
 
         if (event.from != core::EventFrom::FromServer) return;

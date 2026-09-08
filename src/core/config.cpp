@@ -9,7 +9,7 @@ namespace core {
 static const std::map<std::string, ConfigStorage> config_defaults{
     { "server.port", 16999 },
     { "server.address", "www.growtopia1.com" },
-    { "client.game_version", "5.21" },
+    { "client.game_version", "5.55" },
     { "client.protocol", 312 },
     { "client.dnsServer", "cloudflare" },
     { "extension.ignore", std::vector<std::string>{ "0xdeadbeef" } },
@@ -33,6 +33,9 @@ static const std::map<std::string, ConfigStorage> config_defaults{
     { "growtopia.auto_launch", true },
     { "growtopia.auto_close", true },
     { "growtopia.path", std::string("") },
+    { "pathfind.enabled", true },
+    { "pathfind.cooldown_ms", 2000 },
+    { "gui.auto_show", false },
 };
 
 Config::Config()
