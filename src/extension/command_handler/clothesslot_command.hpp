@@ -6,24 +6,32 @@
 
 namespace command {
 
-class ProxyCommand : public CommandBase {
+// /save1, /save2, /save3, /save4 — Save current visual clothes to slot
+class SaveSlotCommand : public CommandBase {
 public:
-    ProxyCommand();
+    explicit SaveSlotCommand(int slot);
     void execute(client::Client* client, const std::vector<std::string>& args) override;
     std::unique_ptr<CommandBase> clone() const override;
-    
+
     static void set_core(core::Core* core);
-    static void show_commands_gui(player::Player* player, core::Core* core, const std::string& filter = "", const std::string& category = "all");
-    static void handle_dialog_return(player::Player* player, const std::string& button_clicked, const std::string& search_query);
+
+private:
+    int slot_;
+    static core::Core* s_core;
 };
 
-class InfoCommand : public CommandBase {
+// /load1, /load2, /load3, /load4, /set1, /set2, /set3, /set4 — Load visual clothes from slot
+class LoadSlotCommand : public CommandBase {
 public:
-    InfoCommand();
+    explicit LoadSlotCommand(int slot);
     void execute(client::Client* client, const std::vector<std::string>& args) override;
     std::unique_ptr<CommandBase> clone() const override;
-    
+
     static void set_core(core::Core* core);
+
+private:
+    int slot_;
+    static core::Core* s_core;
 };
 
-} 
+} // namespace command

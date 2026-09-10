@@ -10,6 +10,8 @@
 #include "../../utils/text_parse.hpp"
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
+#include <thread>
+#include <chrono>
 
 namespace command {
 
@@ -114,13 +116,12 @@ void PositionCommand::execute(client::Client* client, const std::vector<std::str
         return;
     }
 
-    
+    if (args.empty()) return;
+    const std::string& cmd = args[0];
+
     int pos_index = -1;
     std::string pos_name;
     
-    if (args.empty()) return;
-    
-    const std::string& cmd = args[0];
     if (cmd == "pos1") { pos_index = 0; pos_name = "1"; }
     else if (cmd == "pos2") { pos_index = 1; pos_name = "2"; }
     else if (cmd == "pos3") { pos_index = 2; pos_name = "3"; }
@@ -129,21 +130,28 @@ void PositionCommand::execute(client::Client* client, const std::vector<std::str
     
     if (pos_index == -1) return;
 
-    
-    
-    std::string pos_x_str = s_core->get_config().get<std::string>("player.position.x");
-    std::string pos_y_str = s_core->get_config().get<std::string>("player.position.y");
-    
+    // Get current real-time position from PlayerTracker, fallback to config if needed
     float pos_x = 0.0f;
     float pos_y = 0.0f;
-    
-    try {
-        pos_x = std::stof(pos_x_str);
-        pos_y = std::stof(pos_y_str);
-    } catch (const std::exception& e) {
-        send_console(server->get_player(), "`4Failed to get position - not tracked yet");
-        spdlog::warn("PositionCommand: Failed to parse position from config");
-        return;
+    auto& tracker = utils::PlayerTracker::get_instance();
+    auto local = tracker.get_local_player();
+    if (local.netID != 0) {
+        pos_x = local.position.x;
+        pos_y = local.position.y;
+        s_core->get_config().set<std::string>("player.position.x", std::to_string(pos_x));
+        s_core->get_config().set<std::string>("player.position.y", std::to_string(pos_y));
+        s_core->get_config().save();
+    } else {
+        std::string pos_x_str = s_core->get_config().get<std::string>("player.position.x");
+        std::string pos_y_str = s_core->get_config().get<std::string>("player.position.y");
+        try {
+            pos_x = std::stof(pos_x_str);
+            pos_y = std::stof(pos_y_str);
+        } catch (const std::exception& e) {
+            send_console(server->get_player(), "`4Failed to get position - not tracked yet");
+            spdlog::warn("PositionCommand: Failed to parse position from config");
+            return;
+        }
     }
     
     
@@ -160,12 +168,20 @@ void PositionCommand::execute(client::Client* client, const std::vector<std::str
     send_console(server->get_player(), msg);
     
     
-    int particle_id = (pos_index == 4) ? 356 : 354; 
-    send_particle(server->get_player(), particle_id, 
-                  static_cast<float>(tile_x * 32 + 16), 
-                  static_cast<float>(tile_y * 32 + 16));
+    // Play visual target reticle effect at set position (particle 88 for pos1-4, 356 for posback)
+    int particle_id = (pos_index == 4) ? 356 : 88; 
+    float px = static_cast<float>(tile_x * 32 + 16);
+    float py = static_cast<float>(tile_y * 32 + 16);
     
-    spdlog::info("Set position {} to ({}, {})", pos_name, tile_x, tile_y);
+    auto* srv_player = server->get_player();
+    std::thread([srv_player, particle_id, px, py]() {
+        for (int i = 0; i < 3; ++i) {
+            send_particle(srv_player, particle_id, px, py);
+            std::this_thread::sleep_for(std::chrono::milliseconds(120));
+        }
+    }).detach();
+    
+    spdlog::info("Set position {} to ({}, {}) with visual effect {}", pos_name, tile_x, tile_y, particle_id);
 }
 
 

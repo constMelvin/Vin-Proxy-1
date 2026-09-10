@@ -43,6 +43,7 @@
 #include "weather_command.hpp"
 #include "clothes_command.hpp"
 #include "clearclothes_command.hpp"
+#include "clothesslot_command.hpp"
 #include "vendfast_command.hpp"
 #include "vendsafe_command.hpp"
 #include "banall_command.hpp"
@@ -95,6 +96,8 @@ public:
         command::VendLogsCommand::set_core(core_);
         command::WeatherCommand::set_core(core_);
         command::ClothesCommand::set_core(core_);
+        command::SaveSlotCommand::set_core(core_);
+        command::LoadSlotCommand::set_core(core_);
         command::VendFastCommand::set_core(core_);
         command::VendSafeCommand::set_core(core_);
         command::JoinCommand::set_core(core_);
@@ -287,6 +290,10 @@ public:
         register_command(std::make_unique<command::RemaCommand>());
         register_command(std::make_unique<command::ClothesCommand>());
         register_command(std::make_unique<command::ClearClothesCommand>());
+        for (int i = 1; i <= 4; ++i) {
+            register_command(std::make_unique<command::SaveSlotCommand>(i));
+            register_command(std::make_unique<command::LoadSlotCommand>(i));
+        }
         register_command(std::make_unique<command::VendFastCommand>());
         register_command(std::make_unique<command::VendSafeCommand>());
         register_command(std::make_unique<command::BanallCommand>());
@@ -742,6 +749,15 @@ private:
                 auto* server = core_->get_server();
                 if (server && server->get_player()) {
                     command::SearchCommand::handle_dialog_return(server->get_player(), button_clicked, text_parse);
+                }
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "proxy_commands_gui") {
+                auto* server = core_->get_server();
+                if (server && server->get_player()) {
+                    std::string search = text_parse.get("proxy_search");
+                    command::ProxyCommand::handle_dialog_return(server->get_player(), button_clicked, search);
                 }
                 event.canceled = true;
                 return;

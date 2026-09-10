@@ -218,13 +218,76 @@ static std::vector<std::string> g_proxy_lines;
 static void LoadProxyDialog() {
     g_proxy_lines.clear();
     std::ifstream f("C:\\Users\\11User\\proxyupdates\\realproxy\\Marv Dialog.txt");
-    if (!f.is_open()) return;
-    std::string line;
-    int count = 0;
-    while (std::getline(f, line) && count < 40) {
-        g_proxy_lines.push_back(line);
-        if (line.empty()) break; 
-        count++;
+    if (f.is_open()) {
+        std::string line;
+        int count = 0;
+        while (std::getline(f, line) && count < 80) {
+            g_proxy_lines.push_back(line);
+            if (line.empty()) break; 
+            count++;
+        }
+    } else {
+        g_proxy_lines = {
+            "=== VINPROXY AVAILABLE COMMANDS ===",
+            "[Position & Movement]",
+            "/pos1 - /pos4 : Save checkpoint 1-4 (spawns ring VFX #88)",
+            "/posback : Save back position",
+            "/tp1 - /tp4 : Teleport to checkpoint 1-4",
+            "/back : Teleport back to saved position",
+            "/path <x> <y> : Walk pathfinding to coordinates",
+            "/findpath : Open pathfinding settings GUI",
+            "/stop : Stop pathfinding walk",
+            "/playertp <netid> : Teleport to player in world",
+            "",
+            "[Economy & Drops]",
+            "/drop, /dropfast [amt] : Fast drop without confirmation",
+            "/dropall : Drop all inventory items",
+            "/dropat <x> <y> [amt] : Drop items at coordinates",
+            "/w1 - /w4, /dw [amt] : Quick drop 1-4 World Locks",
+            "/d1 - /d4, /dd [amt] : Quick drop 1-4 Diamond Locks",
+            "/b1 - /b4, /dbgl [amt] : Quick drop 1-4 Blue Gem Locks",
+            "/balance, /bal : Check currency balance",
+            "/autocomp : Auto-compress currency (WL->DL->BGL)",
+            "/autocollect : Auto-collect nearby items",
+            "/bank, /bankadd, /bankwith, /bankcheck : WL Bank storage",
+            "/vendloc, /vendfind, /vendfast, /vendsafe : Vending tools",
+            "/trashfast : Fast trash items without confirm",
+            "",
+            "[Clothes & Visuals]",
+            "/clothes : Open clothes selector GUI",
+            "/clearclothes : Remove visual clothes",
+            "/save1 - /save4, /set1 - /set4 : Save clothes loadout",
+            "/load1 - /load4 : Equip saved clothes loadout",
+            "/skin <hex> : Set custom skin color",
+            "/name <col> <name> : Set visual name & color",
+            "/title, /cleartitle, /titleicon : Title selection",
+            "/flag <country> : Set country flag",
+            "/rainbow, /dragon, /riftwings, /infinity : Visual auras",
+            "/particle, /itemfx, /hitvfx, /banner : Visual effects",
+            "",
+            "[World & Scanners]",
+            "/warp <world>, /back, /exit : Navigation",
+            "/growscan, /gs, /gsbeta : Scan world items & drops",
+            "/find, /search <item> : Search items in world",
+            "/lockefind : Find Locke in world",
+            "/dat : Inspect tile extra data",
+            "/players : List players in world with NetIDs",
+            "",
+            "[Admin & Moderation]",
+            "/admin, /moddetect, /run : Mod detection & escape",
+            "/immune, /antigravity, /antipunch, /vision, /invis : Cheats",
+            "/sm, /mstate : Super supporter / mod long punch",
+            "/wrench, /join, /banall, /pullall, /freeze : Moderation",
+            "/host, /ignorecsn, /ignorecsnchat : Casino tools",
+            "",
+            "[Automation & Utility]",
+            "/spam, /spamtext, /spamdelay : Chat spammer",
+            "/autosurg, /autocrime : Automation bots",
+            "/gui : Toggle desktop ImGui overlay",
+            "/ping : Real-time ping test",
+            "/devicecheck : Hardware / spoof info",
+            "/proxy, /commands, /help : In-game interactive commands dialog"
+        };
     }
     g_show_proxy = true;
 }

@@ -49,14 +49,14 @@ void HostCommand::send_settings_dialog(player::Player* out) {
 
     std::ostringstream dialog;
     dialog << "set_default_color|`o\n";
-    dialog << "add_label_with_icon|big|`wCasino Hoster Settings``|left|1366\n";
+    dialog << "add_label_with_icon|big|`wCasino Hoster Settings``|left|758\n";
     dialog << "add_spacer|small\n";
-    dialog << "add_checkbox|host_show_real|Show Real Spin|"<< show_real <<"\n";
-    dialog << "add_checkbox|host_show_qq|Show QQ Number|"<< show_qq <<"\n";
-    dialog << "add_checkbox|host_show_reme|Show REME Spin|"<< show_reme <<"\n";
-    dialog << "add_checkbox|host_instant|Show Instant Roulette Spin|"<< instant <<"\n";
-    dialog << "add_checkbox|host_show_last|Show Last Spin|"<< show_last <<"\n";
-    dialog << "end_dialog|host_settings|Close|Save";
+    dialog << "add_checkbox|host_show_real|`2Show `1Real Spin|"<< show_real <<"\n";
+    dialog << "add_checkbox|host_show_qq|`2Show `1QQ Number|"<< show_qq <<"\n";
+    dialog << "add_checkbox|host_show_reme|`2Show `1REME Spin|"<< show_reme <<"\n";
+    dialog << "add_checkbox|host_instant|`2Show `1Instant Roulette Spin|"<< instant <<"\n";
+    dialog << "add_checkbox|host_show_last|`2Show `1Last Spin|"<< show_last <<"\n";
+    dialog << "end_dialog|host_settings|Save|Close";
 
     packet::Variant var{};
     var.add("OnDialogRequest");
