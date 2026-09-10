@@ -23,6 +23,7 @@
 #endif
 #include "../item_finder/item_finder.hpp"
 #include "../../utils/weapon_animation_manager.hpp"
+#include "../../utils/visual_items_manager.hpp"
 #include "clothes_command.hpp"
 
 
@@ -1397,6 +1398,7 @@ void SmCommand::execute(client::Client* client, const std::vector<std::string>& 
         bs.write_data(ext_data.data(), ext_data.size());
 
         server->get_player()->send_packet(bs.get_data(), 0);
+        utils::VisualItemsManager::get_instance().send_character_state(server->get_player(), local_player.netID);
         
         std::string msg = fmt::format("`0[ `bVinProxy `0] `9SuperMod: `b{} `9(applied immediately!)\n`4Note: Server validates mod permissions", 
                                        s_sm_enabled ? "ON" : "OFF");
@@ -2129,7 +2131,13 @@ void MstateCommand::execute(client::Client* client, const std::vector<std::strin
     s_core->get_config().set("player.mstate_enabled", s_mstate_enabled);
     s_core->get_config().save();
     
-    std::string msg = fmt::format("`0[ `bVinProxy `0] `9Mod State (Long Punch): `b{}\n`6Rejoin world to apply!\n`4Warning: May be detected by server!", 
+    auto& tracker = utils::PlayerTracker::get_instance();
+    auto local_player = tracker.get_local_player();
+    if (local_player.netID != 0) {
+        utils::VisualItemsManager::get_instance().send_character_state(server->get_player(), local_player.netID);
+    }
+
+    std::string msg = fmt::format("`0[ `bVinProxy `0] `9Mod State (Long Punch): `b{}\n`6Applied immediately!\n`4Warning: May be detected by server!", 
                                    s_mstate_enabled ? "ON" : "OFF");
     send_console(server->get_player(), msg);
     

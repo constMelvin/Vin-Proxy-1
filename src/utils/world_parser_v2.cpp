@@ -780,7 +780,7 @@ bool World::parse(const uint8_t* data, size_t size) {
             try {
                 size_t start_pos = reader.position();
                 
-                struct ScanResult { size_t offset; uint32_t count; uint32_t size; int score; };
+                struct ScanResult { size_t offset; uint32_t count; uint32_t last_uid; uint32_t size; int score; };
                 std::vector<ScanResult> results;
 
                 
@@ -788,7 +788,6 @@ bool World::parse(const uint8_t* data, size_t size) {
                     reader.seek(start_pos + offset);
                     uint32_t test_count = reader.read<uint32_t>();
                     uint32_t test_uid = reader.read<uint32_t>();
-                    (void)test_uid;
 
                     if (test_count == 0 || test_count > 15000) continue;
 
@@ -810,7 +809,7 @@ bool World::parse(const uint8_t* data, size_t size) {
                             }
                         }
                         if (score >= 1) {
-                            results.push_back({offset, test_count, s, score});
+                            results.push_back({offset, test_count, test_uid, s, score});
                         }
                     }
                 }
@@ -824,10 +823,11 @@ bool World::parse(const uint8_t* data, size_t size) {
                 if (best) {
                     reader.seek(start_pos + best->offset + 8);
                     dropped_items_count = best->count;
+                    last_dropped_item_uid = best->last_uid;
                     uint32_t item_size = best->size;
                     
-                    spdlog::info("Smart-Scan locked: count={}, size={}, offset={}", 
-                                 best->count, item_size, best->offset);
+                    spdlog::info("Smart-Scan locked: count={}, last_uid={}, size={}, offset={}", 
+                                 best->count, best->last_uid, item_size, best->offset);
 
                     dropped_items.reserve(dropped_items_count);
                     for (uint32_t i = 0; i < dropped_items_count; ++i) {
@@ -849,7 +849,12 @@ bool World::parse(const uint8_t* data, size_t size) {
                         reader.seek(item_start + item_size - 4);
                         item.uid = reader.read<uint32_t>();
                         
-                        if (item.id != 0) dropped_items.push_back(item);
+                        if (item.id != 0) {
+                            if (item.uid > last_dropped_item_uid) {
+                                last_dropped_item_uid = item.uid;
+                            }
+                            dropped_items.push_back(item);
+                        }
                         reader.seek(item_start + item_size);
                     }
                 } else {

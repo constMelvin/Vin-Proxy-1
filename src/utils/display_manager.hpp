@@ -14,33 +14,33 @@ namespace utils {
 class DisplayManager {
 public:
     
-    static std::string build_display_name(core::Core* core, const std::string& base_name) {
+    static std::string build_display_name(core::Core* core, const std::string& base_name, uint32_t netID = 0) {
         if (!core) return base_name;
         
         std::string display_name = base_name;
         
-        
         std::string saved_visual_name = core->get_config().get<std::string>("display.visual_name");
         bool show_ping = core->get_config().get<bool>("display.show_ping");
         
-        
         if (!saved_visual_name.empty()) {
             display_name = saved_visual_name;
+        } else {
+            std::string player_color = utils::PlayerTracker::get_instance().get_player_color(netID);
+            if (display_name.size() >= 2 && display_name[0] == '`') {
+                display_name = display_name.substr(2);
+            }
+            display_name = player_color + display_name;
         }
-        
         
         bool has_dr = core->get_config().get<bool>("display.title.dr");
         if (has_dr) {
             display_name = "`9Dr.`` " + display_name;
         }
         
-        
-        
         if (show_ping) {
             auto* server = core->get_server();
             if (server && server->get_player() && server->get_player()->get_peer()) {
                 int ping_ms = static_cast<int>(server->get_player()->get_peer()->roundTripTime);
-                
                 
                 std::string ping_color = "`2"; 
                 if (ping_ms > 150) {
@@ -56,7 +56,6 @@ public:
         return display_name;
     }
     
-    
     static void apply_display_name(core::Core* core, uint32_t netID, const std::string& base_name) {
         if (!core) return;
         
@@ -66,7 +65,7 @@ public:
             return;
         }
         
-        std::string display_name = build_display_name(core, base_name);
+        std::string display_name = build_display_name(core, base_name, netID);
         
         try {
             

@@ -54,7 +54,7 @@ class ParserExtension final : public IParserExtension {
     core::Core* core_;
     EventDispatcher event_dispatcher_;
     mutable std::uint32_t tick_counter_ = 0;
-    bool pending_balance_on_inventory_ = false;
+    bool pending_balance_on_spawn_ = false;
     std::unordered_set<std::string> auto_ignored_names_;
     mutable std::unordered_map<std::string, std::chrono::steady_clock::time_point> recent_real_spins_;
     mutable std::unordered_map<int, std::chrono::steady_clock::time_point> recent_real_spin_values_;
@@ -118,7 +118,13 @@ public:
             }
         }
 
-        const std::string full_name = ping_prefix + base_name + last_suffix;
+        std::string player_color = utils::PlayerTracker::get_instance().get_player_color(netid);
+        std::string clean_base = base_name;
+        if (clean_base.size() >= 2 && clean_base[0] == '`') {
+            clean_base = clean_base.substr(2);
+        }
+
+        const std::string full_name = ping_prefix + player_color + clean_base + last_suffix;
 
         packet::Variant var{};
         var.add("OnNameChanged");
@@ -183,6 +189,15 @@ public:
                     AppendPacket(dir, "[TEXT] " + msg);
                 }
                 if (event.from == core::EventFrom::FromClient) {
+                    std::string raw_msg = event.get_message().get_raw();
+                    if (raw_msg.find("action|quit_to_exit") != std::string::npos) {
+                        auto& inv_mgr = utils::InventoryManager::get_instance();
+                        int wl = 0, dl = 0, bgl = 0, total_wl = 0;
+                        inv_mgr.get_balance(wl, dl, bgl, total_wl);
+                        std::string balance_msg = fmt::format("Balance:`w [ `#{} ā `w| `#{} `!DL `w| `#{} `eBGL`w ]", total_wl, dl, bgl);
+                        utils::PacketUtils::send_chat_message(const_cast<player::Player*>(&event.get_player()), balance_msg, false);
+                        spdlog::info("[BALANCE-CONSOLE] Sent balance message on quit_to_exit: {} WL ({} DL, {} BGL)", total_wl, dl, bgl);
+                    }
                     parse_connection_info(event);
                 }
 
@@ -207,16 +222,13 @@ public:
                 handle_server_messages(event);
 
                 
-                if (event.from == core::EventFrom::FromServer && event.get_packet().type == packet::PACKET_SEND_INVENTORY_STATE && pending_balance_on_inventory_) {
+                if (event.from == core::EventFrom::FromServer && event.get_packet().type == packet::PACKET_SEND_INVENTORY_STATE) {
+                    const auto& ext_data = event.get_ext_data();
                     auto& inv_mgr = utils::InventoryManager::get_instance();
-                    int wl = inv_mgr.get_item_count(242);
-                    int dl = inv_mgr.get_item_count(1796);
-                    int bgl = inv_mgr.get_item_count(7188);
-                    int total_wl = wl + dl * 100 + bgl * 10000;
-                    std::string balance_msg = fmt::format("Balance: [ `#{} ā | `#{} `!DL | `#{} `eBGL`w ]", total_wl, dl, bgl);
-                    utils::PacketUtils::send_chat_message(const_cast<player::Player*>(&event.get_player()), balance_msg, false);
-                    spdlog::info("[BALANCE-CONSOLE] Sent balance message to chat: {} WL ({} DL, {} BGL)", total_wl, dl, bgl);
-                    pending_balance_on_inventory_ = false;
+                    inv_mgr.parse_inventory(ext_data, &event.get_packet());
+                    int wl = 0, dl = 0, bgl = 0, total_wl = 0;
+                    inv_mgr.get_balance(wl, dl, bgl, total_wl);
+                    spdlog::info("[BALANCE-CONSOLE] Loaded inventory state: {} WL ({} DL, {} BGL)", total_wl, dl, bgl);
                 }
 
                 
@@ -326,19 +338,17 @@ private:
 
                 
                 auto& inv_mgr = utils::InventoryManager::get_instance();
-                int wl = inv_mgr.get_item_count(242);
-                int dl = inv_mgr.get_item_count(1796);
-                int bgl = inv_mgr.get_item_count(7188);
-                int total_wl = wl + dl * 100 + bgl * 10000;
-                
-                
-                std::string balance_msg = fmt::format("Balance:`w [ `#{} ā `w| `#{} `!DL `w| `#{} `eBGL`w ]", total_wl, dl, bgl);
-                utils::PacketUtils::send_chat_message(
-                    const_cast<player::Player*>(&event.get_player()),
-                    balance_msg,
-                    false
-                );
-                spdlog::info("[BALANCE-CONSOLE] Sent balance message to chat: {} WL ({} DL, {} BGL)", total_wl, dl, bgl);
+                int wl = 0, dl = 0, bgl = 0, total_wl = 0;
+                inv_mgr.get_balance(wl, dl, bgl, total_wl);
+                if (inv_mgr.has_cached_balance() && total_wl > 0) {
+                    std::string balance_msg = fmt::format("Balance:`w [ `#{} ā `w| `#{} `!DL `w| `#{} `eBGL`w ]", total_wl, dl, bgl);
+                    utils::PacketUtils::send_chat_message(
+                        const_cast<player::Player*>(&event.get_player()),
+                        balance_msg,
+                        false
+                    );
+                    spdlog::info("[BALANCE-CONSOLE] Sent cached balance to chat on logon: {} WL ({} DL, {} BGL)", total_wl, dl, bgl);
+                }
             }
 
             
@@ -775,14 +785,62 @@ private:
                         spdlog::info("`2[Double Jump]`` Auto-enabled for player");
                         core_->get_config().set("features.double_jump", true);
                         spdlog::debug("Double jump config set to: {}", core_->get_config().get<bool>("features.double_jump"));
-                        
-                        pending_balance_on_inventory_ = true;
+
                     }
                 }
                 
                 if (function_name == "OnConsoleMessage") {
                     if (variant.size() >= 2) {
                         std::string message = variant.get<std::string>(1);
+
+                        // Format lock collect console messages: `6Collected: `#1 DL, `6Collected: `#10 WL, `6Collected: `#12 BGL
+                        std::string clean_collect = strip_gt_codes_local(message);
+                        static const std::regex collect_lock_rx(
+                            R"(Collected:?\s+(\d+)\s+(World\s+Locks?|Diamond\s+Locks?|Blue\s+Gem\s+Locks?|WL|DL|BGL)\.?)",
+                            std::regex_constants::icase
+                        );
+                        std::smatch m_coll;
+                        if (std::regex_search(clean_collect, m_coll, collect_lock_rx)) {
+                            int coll_count = 0;
+                            try { coll_count = std::stoi(m_coll[1].str()); } catch (...) {}
+                            std::string coll_type = m_coll[2].str();
+                            std::transform(coll_type.begin(), coll_type.end(), coll_type.begin(), [](unsigned char c) {
+                                return static_cast<char>(std::tolower(c));
+                            });
+
+                            std::string lock_short;
+                            if (coll_type.find("blue") != std::string::npos || coll_type == "bgl") {
+                                lock_short = "BGL";
+                            } else if (coll_type.find("diamond") != std::string::npos || coll_type == "dl") {
+                                lock_short = "DL";
+                            } else {
+                                lock_short = "WL";
+                            }
+
+                            std::string player_name;
+                            auto local_player = utils::PlayerTracker::get_instance().get_local_player();
+                            if (!local_player.name.empty()) {
+                                player_name = strip_gt_codes_local(local_player.name);
+                            } else if (local_player.netID > 0) {
+                                auto pinfo = utils::PlayerTracker::get_instance().get_player_by_netid(local_player.netID);
+                                if (!pinfo.name.empty()) {
+                                    player_name = strip_gt_codes_local(pinfo.name);
+                                }
+                            }
+                            if (player_name.empty()) {
+                                player_name = "You";
+                            }
+
+                            std::string tag = utils::PlayerTracker::get_instance().get_player_tag(0, player_name);
+                            std::string formatted_collect = fmt::format("{} `9Collected: `#{} {}", tag, coll_count, lock_short);
+
+                            packet::Variant new_variant{};
+                            new_variant.add("OnConsoleMessage");
+                            new_variant.add(formatted_collect);
+                            send_modified_call(new_variant);
+                            spdlog::info("[COLLECT-CONSOLE] Formatted collect console message: {}", formatted_collect);
+                            return;
+                        }
                         
                         
                         
@@ -1249,6 +1307,17 @@ private:
                             send_modified_call(new_bubble);
                             return;
                         }
+                    }
+                }
+
+                if (function_name == "OnRequestWorldSelectMenu") {
+                    auto& inv_mgr = utils::InventoryManager::get_instance();
+                    int wl = 0, dl = 0, bgl = 0, total_wl = 0;
+                    inv_mgr.get_balance(wl, dl, bgl, total_wl);
+                    if (total_wl > 0 || inv_mgr.has_cached_balance()) {
+                        std::string balance_msg = fmt::format("Balance:`w [ `#{} ā `w| `#{} `!DL `w| `#{} `eBGL`w ]", total_wl, dl, bgl);
+                        utils::PacketUtils::send_chat_message(const_cast<player::Player*>(&event.get_player()), balance_msg, false);
+                        spdlog::info("[BALANCE-CONSOLE] Sent balance message on world menu: {} WL ({} DL, {} BGL)", total_wl, dl, bgl);
                     }
                 }
             }

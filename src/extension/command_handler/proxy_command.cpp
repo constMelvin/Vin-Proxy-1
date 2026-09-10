@@ -169,8 +169,8 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core) {
         dialog << "add_textbox|`4/vision`` - See in dark|left|\n";
         dialog << "add_textbox|`4/chest`` - See what's in chest|left|\n";
         dialog << "add_textbox|`4/host`` - Open hoster settings dialog|left|\n";
-        dialog << "add_textbox|`4/dwl`` [amount] - Drop specific amount of wls|left|\n";
-        dialog << "add_textbox|`4/ddl`` [amount] - Drop specific amount of dls|left|\n";
+        dialog << "add_textbox|`4/dw`` [amount] - Drop specific amount of wls|left|\n";
+        dialog << "add_textbox|`4/dd`` [amount] - Drop specific amount of dls|left|\n";
         dialog << "add_textbox|`4/dbgl`` [amount] - Drop specific amount of bgls|left|\n";
         dialog << "add_textbox|`4/moddetect`` - Enable/Disable mod spawn detection|left|\n";
         dialog << "add_textbox|`4/run`` - Warp multiple worlds to escape from mods|left|\n";

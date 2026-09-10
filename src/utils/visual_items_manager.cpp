@@ -8,6 +8,7 @@
 #include "../extension/item_finder/item_finder.hpp"
 #include "../proxy_imgui_gui.hpp"
 #include "weapon_animation_manager.hpp"
+#include "../extension/command_handler/utility_commands.hpp"
 #include <spdlog/spdlog.h>
 #include <algorithm>
 
@@ -588,8 +589,8 @@ void VisualItemsManager::send_character_state(player::Player* client_player, uin
     } else {
         tank.flags = 0;
         tank.float_var = 200.0f;
-        tank.vec_x = 1000.0f;
-        tank.vec_y = 400.0f;
+        tank.vec_x = 0.0f;
+        tank.vec_y = 0.0f;
         tank.vec_x2 = 250.0f;
         tank.vec_y2 = 1000.0f;
         tank.jump_count = 128;
@@ -612,11 +613,19 @@ void VisualItemsManager::send_character_state(player::Player* client_player, uin
     // Crucial: never let horizontal speed (vec_x2) or vertical gravity (vec_y2) be 0
     if (tank.vec_x2 <= 0.0f) tank.vec_x2 = 250.0f;
     if (tank.vec_y2 <= 0.0f) tank.vec_y2 = 1000.0f;
-    if (tank.vec_x <= 0.0f) tank.vec_x = 1000.0f;
-    if (tank.vec_y <= 0.0f) tank.vec_y = 400.0f;
     if (tank.float_var <= 0.0f) tank.float_var = 200.0f;
     if (tank.jump_count == 0) tank.jump_count = 128;
     if (tank.animation_type == 0) tank.animation_type = 128;
+
+    // Only set extended punch and build range if /mstate or /sm is explicitly enabled!
+    // When disabled, keep default range (server_state or 0.0f) so the character has normal reach.
+    if (command::MstateCommand::is_mstate_enabled() || command::SmCommand::is_sm_enabled()) {
+        tank.vec_x = 1000.0f;
+        tank.vec_y = 400.0f;
+    } else {
+        tank.vec_x = server_state ? server_state->vec_x : 0.0f;
+        tank.vec_y = server_state ? server_state->vec_y : 0.0f;
+    }
 
     ByteStream<std::uint16_t> bs{};
     (void)bs.write(packet::NET_MESSAGE_GAME_PACKET);

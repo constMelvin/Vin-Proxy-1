@@ -16,6 +16,7 @@ public:
     DropWLCommand();
     std::unique_ptr<CommandBase> clone() const override;
     void execute(client::Client* client, const std::vector<std::string>& args) override;
+    void execute_with_core(client::Client* client, const std::vector<std::string>& args, core::Core* core);
     static void set_core(core::Core* core);
     static bool is_dropping() { return DropCurrencyState::s_dropping.load(); }
 private:
@@ -27,6 +28,7 @@ public:
     DropDLCommand();
     std::unique_ptr<CommandBase> clone() const override;
     void execute(client::Client* client, const std::vector<std::string>& args) override;
+    void execute_with_core(client::Client* client, const std::vector<std::string>& args, core::Core* core);
     static void set_core(core::Core* core);
 private:
     static core::Core* s_core;
@@ -37,6 +39,7 @@ public:
     DropBGLCommand();
     std::unique_ptr<CommandBase> clone() const override;
     void execute(client::Client* client, const std::vector<std::string>& args) override;
+    void execute_with_core(client::Client* client, const std::vector<std::string>& args, core::Core* core);
     static void set_core(core::Core* core);
 private:
     static core::Core* s_core;

@@ -29,6 +29,7 @@ public:
         uint32_t netID = 0;
         uint32_t userID = 0;
         std::string name;
+        std::string name_color;
         std::string country;
         std::string mac_address;
         std::string platform_id;
@@ -53,14 +54,17 @@ public:
     void update_connection_info(uint32_t netID, const std::string& mac, const std::string& country);
     void update_platform_info(uint32_t netID, const std::string& platform_id);
     
-    
     void update_player_name(uint32_t netID, const std::string& name);
+    void update_player_color(uint32_t netID, const std::string& color);
+    std::string get_player_tag(uint32_t netID = 0, const std::string& fallback_name = "") const;
+    std::string get_player_color(uint32_t netID = 0) const;
     
     PlayerInfo get_local_player() const;
     PlayerInfo get_player_by_netid(uint32_t netID) const;
     PlayerPosition get_player_position(uint32_t netID) const;
     bool has_local_player() const;
     uint32_t get_local_netid() const { return local_player_netid_; }
+    uint32_t get_local_userid() const { return local_player_userid_; }
     
     std::unordered_map<uint32_t, PlayerInfo> get_all_players() const;
     static std::string get_device_from_platform_id(const std::string& platform_id);
@@ -134,6 +138,7 @@ private:
     mutable std::mutex mutex_;
     std::unordered_map<uint32_t, PlayerInfo> players_; 
     uint32_t local_player_netid_ = 0;
+    uint32_t local_player_userid_ = 0;
     ClothingInfo server_clothing_;
     ClothingInfo clothing_;
 };

@@ -20,7 +20,9 @@
 #include "../extension/command_handler/banall_command.hpp"
 #include "../extension/command_handler/doorid_command.hpp"
 #include "../extension/command_handler/moddetect_command.hpp"
+#include "../extension/command_handler/drop_currency_command.hpp"
 #include "../extension/web_server/web_server.hpp"
+#include "../utils/packet_utils.hpp"
 
 #include "../utils/socks5_tunnel.hpp"
 #include "../utils/inventory_manager.hpp"
@@ -57,6 +59,42 @@ void send_connection_error_msg(player::Player* to_player) {
     to_player->send_packet(bs.get_data(), 0);
 }
 
+
+void send_client_chat(player::Player* to_player, const std::string& msg) {
+    if (!to_player) return;
+    packet::Variant var{};
+    var.add("OnConsoleMessage");
+    var.add(msg);
+    std::vector<std::byte> ext_data = var.serialize();
+    packet::GameUpdatePacket pkt{};
+    pkt.type = packet::PACKET_CALL_FUNCTION;
+    pkt.net_id = -1;
+    pkt.flags.extended = 1;
+    pkt.data_size = static_cast<uint32_t>(ext_data.size());
+    ByteStream<std::uint16_t> bs{};
+    bs.write(packet::NET_MESSAGE_GAME_PACKET);
+    bs.write(pkt);
+    bs.write_data(ext_data.data(), ext_data.size());
+    to_player->send_packet(bs.get_data(), 0);
+}
+
+void send_client_overlay(player::Player* to_player, const std::string& text) {
+    if (!to_player) return;
+    packet::Variant var{};
+    var.add("OnTextOverlay");
+    var.add(text);
+    std::vector<std::byte> ext_data = var.serialize();
+    packet::GameUpdatePacket pkt{};
+    pkt.type = packet::PACKET_CALL_FUNCTION;
+    pkt.net_id = -1;
+    pkt.flags.extended = 1;
+    pkt.data_size = static_cast<uint32_t>(ext_data.size());
+    ByteStream<std::uint16_t> bs{};
+    bs.write(packet::NET_MESSAGE_GAME_PACKET);
+    bs.write(pkt);
+    bs.write_data(ext_data.data(), ext_data.size());
+    to_player->send_packet(bs.get_data(), 0);
+}
 
 } 
 
@@ -469,11 +507,13 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                 uint8_t  obj_type   = b[1];
                 uint8_t  jump_count = b[2];
                 uint32_t pkt_net_id = 0;
+                int32_t  target_net_id = -1;
                 float    float_var  = 0.f;
                 uint32_t pkt_value  = 0;
                 float    vec_x      = 0.f;
                 float    vec_y      = 0.f;
                 memcpy(&pkt_net_id, b + 4,  4);
+                memcpy(&target_net_id, b + 8, 4);
                 memcpy(&float_var,  b + 16, 4);
                 memcpy(&pkt_value,  b + 20, 4);
                 memcpy(&vec_x,      b + 24, 4);
@@ -482,28 +522,191 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                 auto& wm = utils::WorldManager::get_instance();
 
                 if (pkt_net_id == 0xFFFFFFFF) {
-                    uint32_t new_uid = 1;
-                    {
-                        const auto& live  = wm.get_live_objects();
-                        const auto& items = wm.get_items();
-                        for (const auto& it : live)  if (it.Uid >= new_uid) new_uid = it.Uid + 1;
-                        for (const auto& it : items) if (it.Uid >= new_uid) new_uid = it.Uid + 1;
-                    }
+                    uint32_t new_uid = wm.allocate_next_dropped_uid();
                     world::DroppedItemInfo di{};
                     di.ItemId = static_cast<uint16_t>(pkt_value);
                     di.X      = std::ceil(vec_x);
                     di.Y      = std::ceil(vec_y);
-                    di.Amount = static_cast<uint32_t>(static_cast<uint8_t>(float_var));
+                    
+                    uint32_t count = static_cast<uint32_t>(b[3]);
+                    if (float_var > 0.0f && float_var < 100000.0f) {
+                        uint32_t f_count = static_cast<uint32_t>(float_var);
+                        if (f_count > 0) count = f_count;
+                    }
+                    if (count == 0) count = 1;
+                    di.Amount = count;
                     di.Flag   = obj_type;
                     di.Uid    = new_uid;
                     wm.add_dropped_item(di);
                     spdlog::info("[ITEM_DROP] id={} uid={} x={:.0f} y={:.0f} count={}",
                                  di.ItemId, di.Uid, di.X, di.Y, di.Amount);
 
+                    if (di.ItemId == 242 || di.ItemId == 1796 || di.ItemId == 7188) {
+                        auto local_player = utils::PlayerTracker::get_instance().get_local_player();
+                        bool is_local = (local_player.netID > 0 && target_net_id > 0 && static_cast<uint32_t>(target_net_id) == local_player.netID);
+
+                        // If local player is dropping via /dw, /dd, /dbgl command, command handler prints the summary
+                        if (!is_local || !command::DropCurrencyState::s_dropping.load()) {
+                            std::string dropper_name;
+                            if (target_net_id > 0) {
+                                auto pinfo = utils::PlayerTracker::get_instance().get_player_by_netid(static_cast<uint32_t>(target_net_id));
+                                if (!pinfo.name.empty()) {
+                                    dropper_name = pinfo.name;
+                                }
+                            }
+                            if (dropper_name.empty()) {
+                                if (is_local && !local_player.name.empty()) {
+                                    dropper_name = local_player.name;
+                                } else {
+                                    auto all_players = utils::PlayerTracker::get_instance().get_all_players();
+                                    float best_dist_sq = 250.0f * 250.0f;
+                                    for (const auto& [nid, p] : all_players) {
+                                        float dx = p.position.x - vec_x;
+                                        float dy = p.position.y - vec_y;
+                                        float dist_sq = dx * dx + dy * dy;
+                                        if (dist_sq < best_dist_sq && !p.name.empty()) {
+                                            best_dist_sq = dist_sq;
+                                            dropper_name = p.name;
+                                        }
+                                    }
+                                }
+                            }
+                            if (dropper_name.empty()) {
+                                dropper_name = (target_net_id > 0) ? fmt::format("Player_{}", target_net_id) : "Someone";
+                            }
+
+                            std::string clean_dropper;
+                            for (size_t i = 0; i < dropper_name.size(); ++i) {
+                                if (dropper_name[i] == '`') {
+                                    if (i + 1 < dropper_name.size()) ++i;
+                                    continue;
+                                }
+                                clean_dropper.push_back(dropper_name[i]);
+                            }
+
+                            std::string lock_name = (di.ItemId == 7188) ? "BGL" : ((di.ItemId == 1796) ? "DL" : "WL");
+                            std::string lock_col  = (di.ItemId == 7188) ? "`e" : ((di.ItemId == 1796) ? "`!" : "`#");
+
+                            std::string tag = utils::PlayerTracker::get_instance().get_player_tag(
+                                target_net_id > 0 ? static_cast<uint32_t>(target_net_id) : 0, clean_dropper);
+                            std::string drop_msg = fmt::format("{} `9Dropped {}{} {}``", tag, lock_col, di.Amount, lock_name);
+                            if (core_->get_server() && core_->get_server()->get_player()) {
+                                utils::PacketUtils::send_chat_message(core_->get_server()->get_player(), drop_msg, false);
+                            }
+                            spdlog::info("[MONITOR-DROP] Sent console drop: {}", drop_msg);
+                        }
+                    }
+
                 } else if (pkt_net_id > 0 && pkt_net_id != 0xFFFFFFFC) {
-                    wm.remove_dropped_item_by_uid(pkt_value);
-                    wm.remove_live_object(pkt_value);
-                    spdlog::info("[ITEM_COLLECT] uid={} by net_id={}", pkt_value, pkt_net_id);
+                    wm.record_server_uid(pkt_value);
+                    auto local_player = utils::PlayerTracker::get_instance().get_local_player();
+                    bool is_local = (local_player.netID > 0 && pkt_net_id == static_cast<uint32_t>(local_player.netID));
+
+                    auto opt_item = wm.get_dropped_item(pkt_value);
+                    uint16_t coll_id = 0;
+                    uint32_t coll_amount = 0;
+                    uint32_t matched_uid = 0;
+                    float match_x = 0.0f, match_y = 0.0f;
+                    bool has_match_pos = false;
+
+                    if (opt_item) {
+                        coll_id = opt_item->ItemId;
+                        coll_amount = opt_item->Amount;
+                        matched_uid = opt_item->Uid;
+                        match_x = opt_item->X;
+                        match_y = opt_item->Y;
+                        has_match_pos = true;
+                    } else {
+                        float px = 0.0f, py = 0.0f;
+                        if (is_local) {
+                            px = local_player.position.x;
+                            py = local_player.position.y;
+                            if (px <= 0.0f && py <= 0.0f) {
+                                auto ppos = utils::PlayerTracker::get_instance().get_player_position(local_player.netID);
+                                px = ppos.x;
+                                py = ppos.y;
+                            }
+                        } else {
+                            auto ppos = utils::PlayerTracker::get_instance().get_player_position(pkt_net_id);
+                            px = ppos.x;
+                            py = ppos.y;
+                        }
+
+                        auto nearest_lock = wm.find_nearest_dropped_lock(px, py, 400.0f);
+                        if (nearest_lock) {
+                            coll_id = nearest_lock->ItemId;
+                            coll_amount = nearest_lock->Amount;
+                            matched_uid = nearest_lock->Uid;
+                            match_x = nearest_lock->X;
+                            match_y = nearest_lock->Y;
+                            has_match_pos = true;
+                        } else {
+                            auto nearest_item = wm.find_nearest_dropped_item(px, py, 250.0f);
+                            if (nearest_item) {
+                                coll_id = nearest_item->ItemId;
+                                coll_amount = nearest_item->Amount;
+                                matched_uid = nearest_item->Uid;
+                                match_x = nearest_item->X;
+                                match_y = nearest_item->Y;
+                                has_match_pos = true;
+                            }
+                        }
+                    }
+
+                    if (is_local) {
+                        if (utils::InventoryManager::get_instance().record_collected_uid(pkt_value)) {
+                            if (coll_id > 0 && coll_amount > 0) {
+                                auto& inv_mgr = utils::InventoryManager::get_instance();
+                                inv_mgr.add_item(coll_id, static_cast<uint8_t>(coll_amount > 250 ? 250 : coll_amount));
+                                if (coll_id == 242 || coll_id == 1796 || coll_id == 7188) {
+                                    int wl = 0, dl = 0, bgl = 0, total_wl = 0;
+                                    inv_mgr.get_balance(wl, dl, bgl, total_wl);
+                                    spdlog::info("[BALANCE-COLLECT] Collected {}x item {} -> New balance: {} WL ({} DL, {} BGL)",
+                                                 coll_amount, coll_id, total_wl, dl, bgl);
+                                }
+                            }
+                        }
+                    } else {
+                        // Another player in the world collected an item
+                        if (coll_id == 242 || coll_id == 1796 || coll_id == 7188) {
+                            std::string collector_name;
+                            auto pinfo = utils::PlayerTracker::get_instance().get_player_by_netid(pkt_net_id);
+                            if (!pinfo.name.empty()) {
+                                collector_name = pinfo.name;
+                            } else {
+                                collector_name = fmt::format("Player_{}", pkt_net_id);
+                            }
+
+                            std::string clean_collector;
+                            for (size_t i = 0; i < collector_name.size(); ++i) {
+                                if (collector_name[i] == '`') {
+                                    if (i + 1 < collector_name.size()) ++i;
+                                    continue;
+                                }
+                                clean_collector.push_back(collector_name[i]);
+                            }
+
+                            std::string lock_short = (coll_id == 7188) ? "BGL" : ((coll_id == 1796) ? "DL" : "WL");
+                            std::string tag = utils::PlayerTracker::get_instance().get_player_tag(pkt_net_id, clean_collector);
+                            std::string collect_msg = fmt::format("{} `9Collected: `#{} {}", tag, coll_amount, lock_short);
+                            if (core_->get_server() && core_->get_server()->get_player()) {
+                                utils::PacketUtils::send_chat_message(core_->get_server()->get_player(), collect_msg, false);
+                            }
+                            spdlog::info("[MONITOR-COLLECT] Other player collected: {}", collect_msg);
+                        }
+                    }
+
+                    if (matched_uid > 0) {
+                        wm.remove_dropped_item_by_uid(matched_uid);
+                    }
+                    if (pkt_value > 0) {
+                        wm.remove_dropped_item_by_uid(pkt_value);
+                    }
+                    if (has_match_pos) {
+                        wm.remove_dropped_item(coll_id, match_x, match_y);
+                    }
+                    spdlog::info("[ITEM_COLLECT] uid={} (matched_uid={}) by net_id={} id={} count={}", 
+                                 pkt_value, matched_uid, pkt_net_id, coll_id, coll_amount);
                 }
             }
         }
@@ -534,6 +737,11 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                 player_name.erase(std::remove(player_name.begin(), player_name.end(), '\''), player_name.end());
                                 player_name.erase(std::remove(player_name.begin(), player_name.end(), '"'), player_name.end());
                                 
+                                std::string detected_color = "";
+                                if (player_name.size() >= 2 && player_name[0] == '`') {
+                                    detected_color = player_name.substr(0, 2);
+                                }
+
                                 size_t pos = 0;
                                 while ((pos = player_name.find('`')) != std::string::npos) {
                                     if (pos + 1 < player_name.length()) {
@@ -547,12 +755,27 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                 player_name.erase(0, player_name.find_first_not_of(" \t\r\n"));
                                 player_name.erase(player_name.find_last_not_of(" \t\r\n") + 1);
                                 
+                                uint32_t user_id = 0;
+                                try {
+                                    std::string uid_str = text_parse.get("userID");
+                                    if (!uid_str.empty()) user_id = std::stoul(uid_str);
+                                } catch (...) {}
+
+                                const std::string spawn_type = text_parse.get("type");
+                                const bool is_local = (spawn_type == "local");
+
                                 if (!player_name.empty()) {
+                                    utils::PlayerTracker::get_instance().update_player_info(
+                                        net_id, user_id, player_name, text_parse.get("country"), is_local
+                                    );
                                     utils::PlayerTracker::get_instance().update_player_name(net_id, player_name);
+                                    if (!detected_color.empty()) {
+                                        utils::PlayerTracker::get_instance().update_player_color(net_id, detected_color);
+                                    }
                                     if (!spawn_platform_id.empty()) {
                                         utils::PlayerTracker::get_instance().update_platform_info(net_id, spawn_platform_id);
                                     }
-                                    spdlog::info("[SPAWN-TRACKER] Tracked player spawn: netid={}, name='{}'", net_id, player_name);
+                                    spdlog::info("[SPAWN-TRACKER] Tracked player spawn: netid={}, userid={}, name='{}'", net_id, user_id, player_name);
                                 }
                             }
                             
@@ -569,16 +792,7 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                 command::ModDetectCommand::handle_spawn_packet(spawn_data);
                             }
                             
-                            if (text_parse.get("type") == "local") {
-                                uint32_t user_id = 0;
-                                try {
-                                    std::string uid_str = text_parse.get("userID");
-                                    if (!uid_str.empty()) user_id = std::stoul(uid_str);
-                                } catch (...) {}
-
-                                utils::PlayerTracker::get_instance().update_player_info(
-                                    net_id, user_id, player_name, text_parse.get("country"), true
-                                );
+                            if (spawn_type == "local") {
 
                                 auto parse_cloth = [&](const std::string& key) -> int {
                                     try {

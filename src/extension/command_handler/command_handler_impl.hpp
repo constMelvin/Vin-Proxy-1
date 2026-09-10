@@ -61,6 +61,7 @@
 #include "utility_commands.hpp"
 #include "immune_command.hpp"
 #include "search_command.hpp"
+#include "balance_command.hpp"
 #include "../../core/core.hpp"
 #include "../../client/client.hpp"
 #include "../../server/server.hpp"
@@ -219,6 +220,7 @@ public:
         register_command(std::make_unique<command::GrowScanCommand>());
         register_command(std::make_unique<command::GsBetaCommand>());
         register_command(std::make_unique<command::InventoryCommand>());
+        register_command(std::make_unique<command::BalanceCommand>());
         register_command(std::make_unique<command::DropAllCommand>());
         register_command(std::make_unique<command::AutoCompCommand>());
         register_command(std::make_unique<command::AutoCollectCommand>());
@@ -479,6 +481,12 @@ public:
                 name_cmd->execute_with_core(client, args, core_);
             } else if (auto* ping_cmd = dynamic_cast<command::PingCommand*>(command.get())) {
                 ping_cmd->execute_with_core(client, args, core_);
+            } else if (auto* drop_wl = dynamic_cast<command::DropWLCommand*>(command.get())) {
+                drop_wl->execute_with_core(client, args, core_);
+            } else if (auto* drop_dl = dynamic_cast<command::DropDLCommand*>(command.get())) {
+                drop_dl->execute_with_core(client, args, core_);
+            } else if (auto* drop_bgl = dynamic_cast<command::DropBGLCommand*>(command.get())) {
+                drop_bgl->execute_with_core(client, args, core_);
             } else {
                 command->execute(client, args);
             }
@@ -872,73 +880,116 @@ private:
             }
         }
 
-        if (shift_held) {
-            bool is_click_packet = (game_packet.type == packet::PACKET_TILE_CHANGE_REQUEST ||
-                                    game_packet.type == packet::PACKET_TILE_ACTIVATE_REQUEST ||
-                                    game_packet.type == packet::PACKET_ITEM_ACTIVATE_REQUEST ||
-                                    game_packet.type == packet::PACKET_TILE_APPLY_DAMAGE ||
-                                    game_packet.type == packet::PACKET_STATE);
+        const packet::TankUpdatePacket* tank = nullptr;
+        if (ext_data.size() >= sizeof(packet::TankUpdatePacket)) {
+            tank = reinterpret_cast<const packet::TankUpdatePacket*>(ext_data.data());
+        } else {
+            tank = reinterpret_cast<const packet::TankUpdatePacket*>(&game_packet);
+        }
 
-            if (is_click_packet) {
-                const packet::TankUpdatePacket* tank = nullptr;
-                if (ext_data.size() >= sizeof(packet::TankUpdatePacket)) {
-                    tank = reinterpret_cast<const packet::TankUpdatePacket*>(ext_data.data());
+        bool is_click_packet = (game_packet.type == packet::PACKET_TILE_CHANGE_REQUEST ||
+                                game_packet.type == packet::PACKET_TILE_ACTIVATE_REQUEST ||
+                                game_packet.type == packet::PACKET_ITEM_ACTIVATE_REQUEST ||
+                                game_packet.type == packet::PACKET_TILE_APPLY_DAMAGE ||
+                                game_packet.type == packet::PACKET_STATE);
+
+        // Determine if Fist (punch) is selected:
+        // Item 18 is Fist, item 0 is default/empty hand.
+        // Any other ID (locks, blocks, seeds, wrench, etc.) is NOT fist.
+        bool is_fist_selected = false;
+        if (game_packet.type == packet::PACKET_TILE_CHANGE_REQUEST) {
+            uint16_t item_id = tank ? static_cast<uint16_t>(tank->int_data) : 0;
+            is_fist_selected = (item_id == 18 || item_id == 0);
+        } else if (game_packet.type == packet::PACKET_TILE_APPLY_DAMAGE || game_packet.type == packet::PACKET_STATE) {
+            is_fist_selected = true;
+        }
+
+        if (shift_held && is_click_packet) {
+            // Shift + Click teleport ONLY activates when FIST is selected!
+            // If Fist is NOT selected (e.g. lock or block selected), DO NOT teleport.
+            if (is_fist_selected && tank) {
+                int32_t tx = -1;
+                int32_t ty = -1;
+
+                if (game_packet.type == packet::PACKET_STATE) {
+                    if (tank->int_x >= 0 && tank->int_y >= 0) {
+                        tx = tank->int_x;
+                        ty = tank->int_y;
+                    }
                 } else {
-                    tank = reinterpret_cast<const packet::TankUpdatePacket*>(&game_packet);
+                    tx = (tank->int_x >= 0) ? tank->int_x : static_cast<int32_t>(tank->vec_x / 32.0f);
+                    ty = (tank->int_y >= 0) ? tank->int_y : static_cast<int32_t>(tank->vec_y / 32.0f);
                 }
-                if (tank) {
-                    int32_t tx = -1;
-                    int32_t ty = -1;
 
-                    if (game_packet.type == packet::PACKET_STATE) {
-                        // STATE packets are also sent continuously during normal movement.
-                        // Only treat as a teleport click when explicit tile coords are set.
-                        if (tank->int_x >= 0 && tank->int_y >= 0) {
-                            tx = tank->int_x;
-                            ty = tank->int_y;
-                        }
-                    } else {
-                        tx = (tank->int_x >= 0) ? tank->int_x : static_cast<int32_t>(tank->vec_x / 32.0f);
-                        ty = (tank->int_y >= 0) ? tank->int_y : static_cast<int32_t>(tank->vec_y / 32.0f);
+                if (tx >= 0 && ty >= 0) {
+                    spdlog::info("[SHIFT-CLICK] type={}, tx={}, ty={}",
+                        static_cast<int>(game_packet.type), tx, ty);
+                    client::Client* client = core_->get_client();
+                    if (client) {
+                        command::FindPathCommand::handle_shift_click(client, static_cast<uint32_t>(tx), static_cast<uint32_t>(ty));
                     }
-
-                    if (tx >= 0 && ty >= 0) {
-                        spdlog::info("[SHIFT-CLICK] type={}, tx={}, ty={}",
-                            static_cast<int>(game_packet.type), tx, ty);
-                        client::Client* client = core_->get_client();
-                        if (client && command::FindPathCommand::handle_shift_click(client, static_cast<uint32_t>(tx), static_cast<uint32_t>(ty))) {
-                            const_cast<core::EventPacket&>(event).canceled = true;
-                            return;
-                        }
+                    // Always cancel the click packet so no punch leaks to server!
+                    const_cast<core::EventPacket&>(event).canceled = true;
+                    return;
+                }
+            } else {
+                // If Fist is NOT selected while Shift is held, DO NOT teleport!
+                // Cancel the packet immediately so holding shift never places locks or blocks accidentally.
+                if (game_packet.type != packet::PACKET_STATE) {
+                    const_cast<core::EventPacket&>(event).canceled = true;
+                    auto* srv = core_->get_server();
+                    if (srv && srv->get_player()) {
+                        command::send_overlay(srv->get_player(), "`4Select Fist to Shift+Click teleport!");
                     }
+                    return;
                 }
             }
-        } else {
-            // When Shift is NOT held, block distant punches unless /mstate or /sm is explicitly enabled
-            bool is_tile_action = (game_packet.type == packet::PACKET_TILE_CHANGE_REQUEST ||
-                                   game_packet.type == packet::PACKET_TILE_APPLY_DAMAGE);
-            if (is_tile_action && !command::MstateCommand::is_mstate_enabled() && !command::SmCommand::is_sm_enabled()) {
-                const packet::TankUpdatePacket* tank = nullptr;
-                if (ext_data.size() >= sizeof(packet::TankUpdatePacket)) {
-                    tank = reinterpret_cast<const packet::TankUpdatePacket*>(ext_data.data());
-                } else {
-                    tank = reinterpret_cast<const packet::TankUpdatePacket*>(&game_packet);
+        }
+
+        // STRICT ORIGINAL RANGE ENFORCEMENT ON ALL ITEMS (PUT & BREAK):
+        // On ALL items, never put (place locks, blocks, seeds, tools) or break (punch)
+        // using long range. Putting and breaking is strictly confined to original character range (|diff| <= 2).
+        bool is_tile_action = (game_packet.type == packet::PACKET_TILE_CHANGE_REQUEST ||
+                               game_packet.type == packet::PACKET_TILE_APPLY_DAMAGE ||
+                               game_packet.type == packet::PACKET_TILE_ACTIVATE_REQUEST ||
+                               game_packet.type == packet::PACKET_ITEM_ACTIVATE_REQUEST);
+        if (is_tile_action && tank && tank->int_x >= 0 && tank->int_y >= 0) {
+            float px = -1.0f, py = -1.0f;
+            auto local = utils::PlayerTracker::get_instance().get_local_player();
+            if (local.netID > 0) {
+                auto ppos = utils::PlayerTracker::get_instance().get_player_position(local.netID);
+                if (ppos.x > 0.0f || ppos.y > 0.0f) {
+                    px = ppos.x / 32.0f;
+                    py = ppos.y / 32.0f;
                 }
-                if (tank && tank->int_x >= 0 && tank->int_y >= 0) {
-                    auto local = utils::PlayerTracker::get_instance().get_local_player();
-                    if (local.netID > 0) {
-                        auto ppos = utils::PlayerTracker::get_instance().get_player_position(local.netID);
-                        if (ppos.x > 0.0f || ppos.y > 0.0f) {
-                            float px = ppos.x / 32.0f;
-                            float py = ppos.y / 32.0f;
-                            float dx = static_cast<float>(tank->int_x) - px;
-                            float dy = static_cast<float>(tank->int_y) - py;
-                            if ((dx * dx + dy * dy) > 12.0f) {
-                                const_cast<core::EventPacket&>(event).canceled = true;
-                                return;
-                            }
-                        }
+            }
+            if (px < 0.0f && tank->vec_x > 0.0f && tank->vec_y > 0.0f) {
+                px = tank->vec_x / 32.0f;
+                py = tank->vec_y / 32.0f;
+            }
+            if (px < 0.0f && core_) {
+                try {
+                    std::string sx = core_->get_config().get<std::string>("player.position.x");
+                    std::string sy = core_->get_config().get<std::string>("player.position.y");
+                    if (!sx.empty() && !sy.empty()) {
+                        px = std::stof(sx) / 32.0f;
+                        py = std::stof(sy) / 32.0f;
                     }
+                } catch (...) {}
+            }
+
+            if (px >= 0.0f && py >= 0.0f) {
+                int p_tile_x = static_cast<int>(std::floor(px));
+                int p_tile_y = static_cast<int>(std::floor(py));
+                int diff_x = std::abs(tank->int_x - p_tile_x);
+                int diff_y = std::abs(tank->int_y - p_tile_y);
+
+                // Original character range is strictly at most 2 tiles in X and Y (5x5 interaction box)
+                if (diff_x > 2 || diff_y > 2) {
+                    spdlog::warn("[PROTECTION] Blocked out-of-range action: item={} target=({},{}) player=({},{}) diff=({},{})",
+                                 tank->int_data, tank->int_x, tank->int_y, p_tile_x, p_tile_y, diff_x, diff_y);
+                    const_cast<core::EventPacket&>(event).canceled = true;
+                    return;
                 }
             }
         }
