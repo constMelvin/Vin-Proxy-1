@@ -20,4 +20,28 @@ private:
     static void send_settings_dialog(player::Player* out);
 };
 
+class QQCommand : public CommandBase {
+public:
+    QQCommand();
+    void execute(client::Client* client, const std::vector<std::string>& args) override;
+    std::unique_ptr<CommandBase> clone() const override;
+
+    static void set_core(core::Core* core);
+
+private:
+    static core::Core* s_core;
+};
+
+class RemeCommand : public CommandBase {
+public:
+    RemeCommand();
+    void execute(client::Client* client, const std::vector<std::string>& args) override;
+    std::unique_ptr<CommandBase> clone() const override;
+
+    static void set_core(core::Core* core);
+
+private:
+    static core::Core* s_core;
+};
+
 } 

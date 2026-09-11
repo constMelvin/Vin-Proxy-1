@@ -23,6 +23,7 @@
 #include "../../utils/inventory_manager.hpp"
 #include "../command_handler/dat_command.hpp"
 #include "../command_handler/dropall_command.hpp"
+#include "../command_handler/dropat_command.hpp"
 #include "../command_handler/dropfast_command.hpp"
 #include "../command_handler/trashfast_command.hpp"
 #include "../command_handler/drop_currency_command.hpp"
@@ -916,8 +917,8 @@ private:
                                     std::string num_color = get_roulette_color_code(spin_value);
                                     std::string bubble_base = fmt::format("{} spun the wheel and got {}{}``!", spin_name, num_color, spin_value);
                                     std::string fake_bubble = "`4[FAKE]`` " + bubble_base;
-                                    if (show_qq) fake_bubble += fmt::format(" `8QQ:`w{}``", qq_digit(spin_value));
-                                    if (show_reme) fake_bubble += fmt::format(" `@REME:`w{}``", sum_reme(spin_value));
+                                    if (show_qq) fake_bubble += fmt::format(" `8QQ: `w{}``", qq_digit(spin_value));
+                                    if (show_reme) fake_bubble += fmt::format(" `@REME: {}{}``", get_reme_color_code(spin_value), sum_reme(spin_value));
                                     send_talkbubble_packet(spinner_netid, fake_bubble);
                                     pending_fake_override_spin_values_[spin_value] = now;
                                 } else if (!from_player_chat && instant) {
@@ -928,8 +929,8 @@ private:
                                     std::string bubble_prefix;
                                     if (show_real) bubble_prefix += "`2[REAL]`` ";
                                     std::string bubble_suffix;
-                                    if (show_qq) bubble_suffix += fmt::format(" `8QQ:`w{}``", qq_digit(spin_value));
-                                    if (show_reme) bubble_suffix += fmt::format(" `@REME:`w{}``", sum_reme(spin_value));
+                                    if (show_qq) bubble_suffix += fmt::format(" `8QQ: `w{}``", qq_digit(spin_value));
+                                    if (show_reme) bubble_suffix += fmt::format(" `@REME: {}{}``", get_reme_color_code(spin_value), sum_reme(spin_value));
                                     
                                     std::string decorated_bubble = bubble_prefix + bubble_base + bubble_suffix;
 
@@ -1297,8 +1298,8 @@ private:
                             prefix += "`2[REAL]`` ";
                         }
                         std::string suffix;
-                        if (show_qq) suffix += fmt::format(" `8QQ:`w{}``", qq_digit(spin_value));
-                        if (show_reme) suffix += fmt::format(" `@REME:`w{}``", sum_reme(spin_value));
+                        if (show_qq) suffix += fmt::format(" `8QQ: `w{}``", qq_digit(spin_value));
+                        if (show_reme) suffix += fmt::format(" `@REME: {}{}``", get_reme_color_code(spin_value), sum_reme(spin_value));
                         if (!prefix.empty() || !suffix.empty()) {
                             decorated = prefix + bubble_text + suffix;
                             
@@ -1351,6 +1352,8 @@ private:
                 
                 auto& tracker = utils::PlayerTracker::get_instance();
                 auto local_player = tracker.get_local_player();
+                bool is_facing_left = (tank->flags & packet::PACKET_FLAG_ROTATE_LEFT) != 0;
+                command::DropAtCommand::set_local_facing_left(is_facing_left);
                 if (local_player.netID > 0) {
                     tracker.update_player_position(local_player.netID, tank->vec_x, tank->vec_y);
                     command::FindPathCommand::update_last_target_pos(tank->vec_x, tank->vec_y);
@@ -1373,7 +1376,10 @@ private:
                 auto& tracker = utils::PlayerTracker::get_instance();
                 auto local_player = tracker.get_local_player();
                 
-                if (local_player.netID > 0 && static_cast<uint32_t>(tank->net_id) != local_player.netID) {
+                if (local_player.netID > 0 && static_cast<uint32_t>(tank->net_id) == local_player.netID) {
+                    bool is_facing_left = (tank->flags & packet::PACKET_FLAG_ROTATE_LEFT) != 0;
+                    command::DropAtCommand::set_local_facing_left(is_facing_left);
+                } else if (local_player.netID > 0 && static_cast<uint32_t>(tank->net_id) != local_player.netID) {
                     spdlog::debug("[OTHER PLAYER {}] Tile: ({}, {}) | Pixels: ({:.0f}, {:.0f})", 
                                  tank->net_id, tile_x, tile_y, tank->vec_x, tank->vec_y);
                 }
@@ -1600,7 +1606,24 @@ private:
                 if (std::get<std::string>(variants[0]) == "OnDialogRequest") {
                     std::string dialog = std::get<std::string>(variants[1]);
                     if (dialog.find("dialog_name|drop_item") != std::string::npos &&
-                        command::DropWLCommand::is_dropping()) {
+                        (command::DropAllCommand::is_running() || command::DropAtCommand::is_running() || command::DropWLCommand::is_dropping())) {
+                        if (dialog.find("add_text_input|count|") == std::string::npos) {
+                            std::smatch m;
+                            if (std::regex_search(dialog, m, std::regex("embed_data\\|itemID\\|([0-9]+)"))) {
+                                std::string item_id = m[1].str();
+                                std::string resp = "action|dialog_return\ndialog_name|drop_item\nitemID|" + item_id + "|\nbuttonClicked|yes\n";
+                                auto* core = core_;
+                                std::thread([core, resp]() {
+                                    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+                                    if (core && core->get_client() && core->get_client()->get_player()) {
+                                        ByteStream<std::uint16_t> bs{};
+                                        bs.write(packet::NET_MESSAGE_GENERIC_TEXT);
+                                        bs.write(resp, false);
+                                        core->get_client()->get_player()->send_packet(bs.get_data(), 0);
+                                    }
+                                }).detach();
+                            }
+                        }
                         const_cast<core::EventPacket&>(event).canceled = true;
                         return;
                     }
@@ -1616,7 +1639,7 @@ private:
                     if (std::get<std::string>(variants[0]) == "OnDialogRequest") {
                         std::string dialog = std::get<std::string>(variants[1]);
                         if (dialog.find("dialog_name|drop_item") != std::string::npos &&
-                            (command::DropAllCommand::is_running() || command::DropWLCommand::is_dropping())) {
+                            (command::DropAllCommand::is_running() || command::DropAtCommand::is_running() || command::DropWLCommand::is_dropping())) {
                             
                             const_cast<core::EventPacket&>(event).canceled = true;
                             return;
@@ -1823,7 +1846,24 @@ private:
                         try { wrench_auto_ban = core_->get_config().get<bool>("features.wrench.auto_ban"); } catch (...) {}
 
                         if (dialog_content.find("end_dialog|drop_item") != std::string::npos) {
-                            if (command::DropAllCommand::is_running() || command::DropWLCommand::is_dropping()) {
+                            if (command::DropAllCommand::is_running() || command::DropAtCommand::is_running() || command::DropWLCommand::is_dropping()) {
+                                if (dialog_content.find("add_text_input|count|") == std::string::npos) {
+                                    std::smatch m;
+                                    if (std::regex_search(dialog_content, m, std::regex("embed_data\\|itemID\\|([0-9]+)"))) {
+                                        std::string item_id = m[1].str();
+                                        std::string resp = "action|dialog_return\ndialog_name|drop_item\nitemID|" + item_id + "|\nbuttonClicked|yes\n";
+                                        core::Core* core = core_;
+                                        std::thread([core, resp]() {
+                                            std::this_thread::sleep_for(std::chrono::milliseconds(80));
+                                            if (core && core->get_client() && core->get_client()->get_player()) {
+                                                ByteStream<std::uint16_t> bs{};
+                                                bs.write(packet::NET_MESSAGE_GENERIC_TEXT);
+                                                bs.write(resp, false);
+                                                core->get_client()->get_player()->send_packet(bs.get_data(), 0);
+                                            }
+                                        }).detach();
+                                    }
+                                }
                                 spdlog::info("Parser: suppressing drop_item dialog");
                                 const_cast<core::EventPacket&>(event).canceled = true;
                                 return;
@@ -1833,17 +1873,25 @@ private:
                                 std::smatch m;
                                 if (std::regex_search(dialog_content, m, std::regex("embed_data\\|itemID\\|([0-9]+)")))
                                     item_id = m[1].str();
-                                if (std::regex_search(dialog_content, m, std::regex("add_text_input\\|count\\|\\|([0-9]*)")))
+                                if (std::regex_search(dialog_content, m, std::regex("add_text_input\\|count\\|[^|]*\\|([0-9]*)")))
                                     count = m[1].str();
+                                bool has_count_field = (dialog_content.find("add_text_input|count|") != std::string::npos);
                                 if (!item_id.empty()) {
                                     std::string resp;
-                                    if (!count.empty()) {
-                                        
-                                        resp = "action|dialog_return\ndialog_name|drop_item\nitemID|" + item_id + "|\ncount|" + count + "|\nbuttonClicked|yes";
+                                    if (has_count_field) {
+                                        if (count.empty() || count == "0") {
+                                            try {
+                                                uint16_t id = static_cast<uint16_t>(std::stoul(item_id));
+                                                int inv_count = utils::InventoryManager::get_instance().get_item_count(id);
+                                                count = (inv_count > 0) ? std::to_string(std::min(inv_count, 200)) : "200";
+                                            } catch (...) {
+                                                count = "200";
+                                            }
+                                        }
+                                        resp = "action|dialog_return\ndialog_name|drop_item\nitemID|" + item_id + "|\ncount|" + count + "\n";
                                         spdlog::info("DropFast: auto-confirmed drop itemID={} count={}", item_id, count);
                                     } else {
-                                        
-                                        resp = "action|dialog_return\ndialog_name|drop_item\nitemID|" + item_id + "|\nbuttonClicked|yes";
+                                        resp = "action|dialog_return\ndialog_name|drop_item\nitemID|" + item_id + "|\nbuttonClicked|yes\n";
                                         spdlog::info("DropFast: auto-confirmed warning dialog itemID={}", item_id);
                                     }
                                     core::Core* core = core_;

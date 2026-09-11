@@ -11,7 +11,7 @@ core::Core* DropFastCommand::s_core = nullptr;
 bool DropFastCommand::s_enabled = false;
 
 DropFastCommand::DropFastCommand() : CommandBase(
-    {"dropfast", "df"},
+    {"fd"},
     {},
     "Toggle fast drop mode (auto-confirms drop dialogs)",
     0

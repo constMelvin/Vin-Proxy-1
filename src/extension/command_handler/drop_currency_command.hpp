@@ -45,6 +45,17 @@ private:
     static core::Core* s_core;
 };
 
+class DropAllLocksCommand : public CommandBase {
+public:
+    DropAllLocksCommand();
+    std::unique_ptr<CommandBase> clone() const override;
+    void execute(client::Client* client, const std::vector<std::string>& args) override;
+    void execute_with_core(client::Client* client, const std::vector<std::string>& args, core::Core* core);
+    static void set_core(core::Core* core);
+private:
+    static core::Core* s_core;
+};
+
 
 
 class VisualDropCommand : public CommandBase {

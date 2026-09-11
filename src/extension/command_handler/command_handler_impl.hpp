@@ -106,6 +106,8 @@ public:
         command::IgnoreCSNCommand::set_core(core_);
         command::IgnoreCSNChatCommand::set_core(core_);
         command::HostCommand::set_core(core_);
+        command::QQCommand::set_core(core_);
+        command::RemeCommand::set_core(core_);
         command::WrenchCommand::set_core(core_);
         command::ModDetectCommand::set_core(core_);
         command::LockeFindCommand::set_core(core_);
@@ -127,6 +129,7 @@ public:
         command::DropWLCommand::set_core(core_);
         command::DropDLCommand::set_core(core_);
         command::DropBGLCommand::set_core(core_);
+        command::DropAllLocksCommand::set_core(core_);
         command::GhostCharCommand::set_core(core_);
         command::VisualDropCommand::set_core(core_);
         command::BanFireCommand::set_core(core_);
@@ -137,6 +140,7 @@ public:
         command::TeleportPosCommand::set_core(core_);
         command::BackCommand::set_core(core_);
         command::DropAtCommand::set_core(core_);
+        command::DposCommand::set_core(core_);
         command::FindPathCommand::set_core(core_);
         command::RunCommand::set_core(core_);
         command::PlayerTPCommand::set_core(core_);
@@ -231,6 +235,7 @@ public:
         register_command(std::make_unique<command::DropWLCommand>());
         register_command(std::make_unique<command::DropDLCommand>());
         register_command(std::make_unique<command::DropBGLCommand>());
+        register_command(std::make_unique<command::DropAllLocksCommand>());
         register_command(std::make_unique<command::GhostCharCommand>());
         register_command(std::make_unique<command::VisualDropCommand>());
         register_command(std::make_unique<command::FillGBCCommand>());
@@ -252,6 +257,7 @@ public:
         register_command(std::make_unique<command::TeleportPosCommand>());
         register_command(std::make_unique<command::BackCommand>());
         register_command(std::make_unique<command::DropAtCommand>());
+        register_command(std::make_unique<command::DposCommand>());
         register_command(std::make_unique<command::FindPathCommand>());
         register_command(std::make_unique<command::PlayerTPCommand>());
         register_command(std::make_unique<command::FlagCommand>());
@@ -301,6 +307,8 @@ public:
         register_command(std::make_unique<command::IgnoreCSNCommand>());
         register_command(std::make_unique<command::IgnoreCSNChatCommand>());
         register_command(std::make_unique<command::HostCommand>());
+        register_command(std::make_unique<command::QQCommand>());
+        register_command(std::make_unique<command::RemeCommand>());
         register_command(std::make_unique<command::WrenchCommand>());
         register_command(std::make_unique<command::ModDetectCommand>());
         register_command(std::make_unique<command::LockeFindCommand>());
@@ -494,6 +502,8 @@ public:
                 drop_dl->execute_with_core(client, args, core_);
             } else if (auto* drop_bgl = dynamic_cast<command::DropBGLCommand*>(command.get())) {
                 drop_bgl->execute_with_core(client, args, core_);
+            } else if (auto* drop_daw = dynamic_cast<command::DropAllLocksCommand*>(command.get())) {
+                drop_daw->execute_with_core(client, args, core_);
             } else {
                 command->execute(client, args);
             }

@@ -21,7 +21,7 @@ private:
     static std::atomic<bool> s_running;
     static std::atomic<std::uint64_t> s_generation;
 
-    static void run_dropall(std::uint64_t generation);
+    static void run_dropall(std::uint64_t generation, int max_quantity = 0);
 };
 
 } 

@@ -6,10 +6,13 @@
 #include "../../utils/byte_stream.hpp"
 
 #include <sstream>
+#include <algorithm>
 
 namespace command {
 
 core::Core* HostCommand::s_core = nullptr;
+core::Core* QQCommand::s_core = nullptr;
+core::Core* RemeCommand::s_core = nullptr;
 
 HostCommand::HostCommand() : CommandBase(
     {"host"},
@@ -101,6 +104,130 @@ void HostCommand::apply_dialog_settings(const TextParse& tp) {
             "`2Host settings updated``.",
             false
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// QQCommand
+// ---------------------------------------------------------------------------
+QQCommand::QQCommand() : CommandBase(
+    {"qq", "showqq"},
+    {"[on/off]"},
+    "Toggle Show QQ Number in roulette spin",
+    0
+) {}
+
+std::unique_ptr<CommandBase> QQCommand::clone() const {
+    return std::make_unique<QQCommand>(*this);
+}
+
+void QQCommand::set_core(core::Core* core) {
+    s_core = core;
+}
+
+void QQCommand::execute(client::Client* client, const std::vector<std::string>& args) {
+    if (!client || !client->get_player() || !s_core) return;
+
+    player::Player* out_client = client->get_player();
+    player::Player* out_server = nullptr;
+    if (s_core->get_server() && s_core->get_server()->get_player()) {
+        out_server = s_core->get_server()->get_player();
+    }
+
+    bool enabled = false;
+    try {
+        enabled = s_core->get_config().get<bool>("features.host.show_qq_number");
+    } catch (...) {
+        enabled = false;
+    }
+
+    if (!args.empty()) {
+        std::string arg = args[0];
+        std::transform(arg.begin(), arg.end(), arg.begin(), ::tolower);
+        if (arg == "on" || arg == "1" || arg == "enable" || arg == "true") {
+            enabled = true;
+        } else if (arg == "off" || arg == "0" || arg == "disable" || arg == "false") {
+            enabled = false;
+        } else {
+            enabled = !enabled;
+        }
+    } else {
+        enabled = !enabled;
+    }
+
+    s_core->get_config().set<bool>("features.host.show_qq_number", enabled);
+
+    const std::string msg = enabled
+        ? "`0[`bVinProxy`0] `9Show QQ Number is now `2ENABLED``."
+        : "`0[`bVinProxy`0] `9Show QQ Number is now `4DISABLED``.";
+
+    if (out_client) {
+        utils::PacketUtils::send_chat_message(out_client, msg, false);
+    }
+    if (out_server && out_server != out_client) {
+        utils::PacketUtils::send_chat_message(out_server, msg, false);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RemeCommand
+// ---------------------------------------------------------------------------
+RemeCommand::RemeCommand() : CommandBase(
+    {"reme", "showreme"},
+    {"[on/off]"},
+    "Toggle Show REME Spin in roulette spin",
+    0
+) {}
+
+std::unique_ptr<CommandBase> RemeCommand::clone() const {
+    return std::make_unique<RemeCommand>(*this);
+}
+
+void RemeCommand::set_core(core::Core* core) {
+    s_core = core;
+}
+
+void RemeCommand::execute(client::Client* client, const std::vector<std::string>& args) {
+    if (!client || !client->get_player() || !s_core) return;
+
+    player::Player* out_client = client->get_player();
+    player::Player* out_server = nullptr;
+    if (s_core->get_server() && s_core->get_server()->get_player()) {
+        out_server = s_core->get_server()->get_player();
+    }
+
+    bool enabled = true;
+    try {
+        enabled = s_core->get_config().get<bool>("features.host.show_reme_spin");
+    } catch (...) {
+        enabled = true;
+    }
+
+    if (!args.empty()) {
+        std::string arg = args[0];
+        std::transform(arg.begin(), arg.end(), arg.begin(), ::tolower);
+        if (arg == "on" || arg == "1" || arg == "enable" || arg == "true") {
+            enabled = true;
+        } else if (arg == "off" || arg == "0" || arg == "disable" || arg == "false") {
+            enabled = false;
+        } else {
+            enabled = !enabled;
+        }
+    } else {
+        enabled = !enabled;
+    }
+
+    s_core->get_config().set<bool>("features.host.show_reme_spin", enabled);
+
+    const std::string msg = enabled
+        ? "`0[`bVinProxy`0] `9Show REME Spin is now `2ENABLED``."
+        : "`0[`bVinProxy`0] `9Show REME Spin is now `4DISABLED``.";
+
+    if (out_client) {
+        utils::PacketUtils::send_chat_message(out_client, msg, false);
+    }
+    if (out_server && out_server != out_client) {
+        utils::PacketUtils::send_chat_message(out_server, msg, false);
     }
 }
 

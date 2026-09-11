@@ -24,8 +24,8 @@ bool DropAllCommand::is_running() {
 
 DropAllCommand::DropAllCommand() : CommandBase(
     {"dropall"},
-    {},
-    "Drop all items from inventory",
+    {"[quantity]"},
+    "Drop items from inventory (all or specified quantity)",
     0
 ) {}
 
@@ -67,7 +67,7 @@ static void send_generic_text(player::Player* to_server_player, const std::strin
     to_server_player->send_packet(bs.get_data(), 0);
 }
 
-void DropAllCommand::execute(client::Client* , const std::vector<std::string>& ) {
+void DropAllCommand::execute(client::Client* , const std::vector<std::string>& args) {
     spdlog::info("DropAllCommand::execute called; s_core={}, server={}", (void*)s_core, (void*)(s_core ? s_core->get_server() : nullptr));
 
     if (!s_core) {
@@ -81,6 +81,20 @@ void DropAllCommand::execute(client::Client* , const std::vector<std::string>& )
         return;
     }
 
+    int max_quantity = 0;
+    if (args.size() > 1) {
+        try {
+            max_quantity = std::stoi(args[1]);
+            if (max_quantity <= 0) {
+                send_console(server->get_player(), "`4[ `bVinProxy `4] `9Quantity must be greater than 0");
+                return;
+            }
+        } catch (...) {
+            send_console(server->get_player(), fmt::format("`4[ `bVinProxy `4] `9Invalid quantity: {}", args[1]));
+            return;
+        }
+    }
+
     
     if (s_running.load()) {
         spdlog::info("DropAllCommand::execute - cancelling existing run");
@@ -92,18 +106,22 @@ void DropAllCommand::execute(client::Client* , const std::vector<std::string>& )
     }
 
     
-    spdlog::info("DropAllCommand::execute - starting new run");
+    spdlog::info("DropAllCommand::execute - starting new run (max_quantity={})", max_quantity);
     s_running = true;
     const std::uint64_t gen = ++s_generation;
-    send_console(server->get_player(), "`0[ `bVinProxy `0] `9dropping all items..");
+    if (max_quantity > 0) {
+        send_console(server->get_player(), fmt::format("`0[ `bVinProxy `0] `9dropping up to `w{}`9 of each item..", max_quantity));
+    } else {
+        send_console(server->get_player(), "`0[ `bVinProxy `0] `9dropping all items..");
+    }
 
-    std::thread([gen]() {
-        spdlog::info("DropAllCommand thread launched (gen={})", gen);
-        run_dropall(gen);
+    std::thread([gen, max_quantity]() {
+        spdlog::info("DropAllCommand thread launched (gen={}, max_quantity={})", gen, max_quantity);
+        run_dropall(gen, max_quantity);
     }).detach();
 }
 
-void DropAllCommand::run_dropall(std::uint64_t generation) {
+void DropAllCommand::run_dropall(std::uint64_t generation, int max_quantity) {
     auto finish = []() {
         DropAllCommand::s_running = false;
     };
@@ -145,26 +163,43 @@ void DropAllCommand::run_dropall(std::uint64_t generation) {
             break;
         }
 
+        // Skip empty or 0 amount items (do not skip seeds or any inventory items)
         if (item.id == 0 || item.amount == 0) {
             continue;
         }
 
-        int remaining = static_cast<int>(item.amount);
+        int remaining = (max_quantity > 0)
+            ? std::min(static_cast<int>(item.amount), max_quantity)
+            : static_cast<int>(item.amount);
+
+        if (remaining <= 0) {
+            continue;
+        }
+
         while (remaining > 0 && generation == s_generation.load()) {
             const int chunk = (remaining > 200) ? 200 : remaining;
             remaining -= chunk;
 
-            
-            send_generic_text(to_server_player, fmt::format("action|drop\n|itemID|{}|", item.id));
+            // Step 1: Send drop request
+            send_generic_text(to_server_player, fmt::format("action|drop\n|itemID|{}|\n", item.id));
             std::this_thread::sleep_for(std::chrono::milliseconds(150));
 
-            std::ostringstream confirm;
-            confirm << "action|dialog_return\n"
-                    << "dialog_name|drop_item\n"
-                    << "itemID|" << item.id << "|\n"
-                    << "count|" << chunk << "|\n"
-                    << "buttonClicked|yes";
-            send_generic_text(to_server_player, confirm.str());
+            // Step 2: Confirm count in drop dialog
+            std::string confirm = fmt::format(
+                "action|dialog_return\ndialog_name|drop_item\nitemID|{}|\ncount|{}\n",
+                item.id, chunk
+            );
+            send_generic_text(to_server_player, confirm);
+
+            // Step 3: If dropping the full stack or a 1-quantity item, confirm the last-item warning dialog
+            if (chunk >= static_cast<int>(item.amount) || remaining == 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(120));
+                std::string warn_confirm = fmt::format(
+                    "action|dialog_return\ndialog_name|drop_item\nitemID|{}|\nbuttonClicked|yes\n",
+                    item.id
+                );
+                send_generic_text(to_server_player, warn_confirm);
+            }
 
             dropped_stacks++;
             std::this_thread::sleep_for(std::chrono::milliseconds(150));
@@ -174,8 +209,13 @@ void DropAllCommand::run_dropall(std::uint64_t generation) {
     if (s_core) {
         auto* local_player = s_core->get_server() ? s_core->get_server()->get_player() : nullptr;
         if (local_player && generation == s_generation.load()) {
-            send_console(local_player,
-                fmt::format("`0[ `bVinProxy `0] `9dropped all items (`w{}`9 stacks)", dropped_stacks));
+            if (max_quantity > 0) {
+                send_console(local_player,
+                    fmt::format("`0[ `bVinProxy `0] `9dropped items (`w{}`9 stacks, up to `w{}`9 each)", dropped_stacks, max_quantity));
+            } else {
+                send_console(local_player,
+                    fmt::format("`0[ `bVinProxy `0] `9dropped all items (`w{}`9 stacks)", dropped_stacks));
+            }
         }
     }
 

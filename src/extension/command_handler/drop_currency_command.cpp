@@ -25,6 +25,7 @@ std::atomic<bool> DropCurrencyState::s_dropping{false};
 core::Core* DropWLCommand::s_core  = nullptr;
 core::Core* DropDLCommand::s_core  = nullptr;
 core::Core* DropBGLCommand::s_core = nullptr;
+core::Core* DropAllLocksCommand::s_core = nullptr;
 core::Core* VisualDropCommand::s_core = nullptr;
 
 static void send_generic(player::Player* p, const std::string& raw) {
@@ -512,6 +513,102 @@ void DropBGLCommand::execute_with_core(client::Client* client, const std::vector
 
 void DropBGLCommand::execute(client::Client* , const std::vector<std::string>& args) {
     execute_drop_single(s_core, args, 7188, "Blue Gem Locks", "BGL");
+}
+
+DropAllLocksCommand::DropAllLocksCommand() : CommandBase(
+    {"daw", "dawl", "dropalllocks", "dropallwl"},
+    {},
+    "Drop all World Locks, Diamond Locks, and Blue Gem Locks from inventory",
+    0
+) {}
+
+std::unique_ptr<CommandBase> DropAllLocksCommand::clone() const {
+    return std::make_unique<DropAllLocksCommand>(*this);
+}
+
+void DropAllLocksCommand::set_core(core::Core* core) { s_core = core; }
+
+void DropAllLocksCommand::execute_with_core(client::Client* client, const std::vector<std::string>& args, core::Core* core) {
+    s_core = core;
+    execute(client, args);
+}
+
+void DropAllLocksCommand::execute(client::Client* , const std::vector<std::string>& ) {
+    auto* core = s_core;
+    if (!core || !core->get_client() || !core->get_client()->get_player()) {
+        send_overlay(core, "`4Drop: not connected!");
+        send_console(core, "`4Drop: not connected!");
+        return;
+    }
+
+    if (DropCurrencyState::s_dropping.load()) {
+        send_overlay(core, "`4Drop already in progress!");
+        send_console(core, "`4Drop already in progress!");
+        return;
+    }
+
+    auto& inv = utils::InventoryManager::get_instance();
+    int have_bgl = inv.get_item_count(7188);
+    int have_dl  = inv.get_item_count(1796);
+    int have_wl  = inv.get_item_count(242);
+
+    if (have_bgl <= 0 && have_dl <= 0 && have_wl <= 0) {
+        send_overlay(core, "`4No locks found in inventory!");
+        send_console(core, " `4You don't have any WL, DL, or BGL in your inventory!");
+        return;
+    }
+
+    DropCurrencyState::s_dropping = true;
+
+    send_console(core, fmt::format(
+        "`9Dropping all locks: `e{} BGL`9, `b{} DL`9, `w{} WL`9...",
+        have_bgl, have_dl, have_wl
+    ));
+
+    std::thread([core, have_bgl, have_dl, have_wl]() {
+        auto& inv = utils::InventoryManager::get_instance();
+        player::Player* client_player = core->get_client()->get_player();
+        if (!client_player) {
+            DropCurrencyState::s_dropping = false;
+            return;
+        }
+
+        auto drop_item_stacks = [&](uint16_t item_id, int total_count) {
+            int remaining = total_count;
+            while (remaining > 0 && core->get_client() && core->get_client()->get_player()) {
+                int chunk = std::min(remaining, 100);
+
+                send_generic(client_player, fmt::format("action|drop\nitemID|{}|", item_id));
+                std::this_thread::sleep_for(std::chrono::milliseconds(130));
+
+                send_generic(client_player,
+                    fmt::format("action|dialog_return\ndialog_name|drop_item\nitemID|{}|\ncount|{}|\nbuttonClicked|yes",
+                        item_id, chunk));
+
+                inv.remove_item(item_id, static_cast<uint8_t>(chunk));
+                inv.record_pending_drop(item_id, static_cast<uint8_t>(chunk));
+
+                remaining -= chunk;
+                std::this_thread::sleep_for(std::chrono::milliseconds(130));
+            }
+        };
+
+        if (have_bgl > 0) drop_item_stacks(7188, have_bgl);
+        if (have_dl > 0)  drop_item_stacks(1796, have_dl);
+        if (have_wl > 0)  drop_item_stacks(242, have_wl);
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        DropCurrencyState::s_dropping = false;
+
+        std::string tag = utils::PlayerTracker::get_instance().get_player_tag(0, get_local_player_name());
+        std::string msg = fmt::format(
+            "{} `9Dropped all locks: `e{} BGL`w, `1{} DL`w, `9{} WL``",
+            tag, have_bgl, have_dl, have_wl
+        );
+        send_console(core, msg, false);
+        send_overlay(core, fmt::format("`2Dropped all locks: `e{} BGL `b{} DL `w{} WL", have_bgl, have_dl, have_wl));
+        spdlog::info("DropCurrency: /daw dropped {} BGL, {} DL, {} WL", have_bgl, have_dl, have_wl);
+    }).detach();
 }
 
 VisualDropCommand::VisualDropCommand() : CommandBase(
