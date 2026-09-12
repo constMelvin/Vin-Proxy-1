@@ -129,6 +129,30 @@ public:
         }
     }
 
+    void set_last_spin(uint32_t netID, int spin) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        last_spins_[netID] = spin;
+    }
+
+    int get_last_spin(uint32_t netID) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = last_spins_.find(netID);
+        if (it != last_spins_.end()) {
+            return it->second;
+        }
+        return -1;
+    }
+
+    bool has_last_spin(uint32_t netID) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return last_spins_.find(netID) != last_spins_.end();
+    }
+
+    void clear_last_spins() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        last_spins_.clear();
+    }
+
     void clear();
 
 private:
@@ -137,6 +161,7 @@ private:
 
     mutable std::mutex mutex_;
     std::unordered_map<uint32_t, PlayerInfo> players_; 
+    std::unordered_map<uint32_t, int> last_spins_;
     uint32_t local_player_netid_ = 0;
     uint32_t local_player_userid_ = 0;
     ClothingInfo server_clothing_;

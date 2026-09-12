@@ -82,50 +82,62 @@ public:
     void update_overhead_name_for(uint32_t netid, const std::string& base_name, const player::Player* target = nullptr) {
         if (netid == 0 || base_name.empty()) return;
 
-        auto host_flag = [&](const std::string& key, bool default_val = true) -> bool {
-            try { return core_->get_config().get<bool>(key); }
-            catch (...) { return default_val; }
-        };
-
-        std::string ping_prefix;
-        const bool show_ping = host_flag("display.show_ping", true) || host_flag("features.host.show_ping", true);
-        if (show_ping) {
-            auto* srv = core_ ? core_->get_server() : nullptr;
-            if (srv && srv->get_player() && srv->get_player()->get_peer()) {
-                int ping_ms = static_cast<int>(srv->get_player()->get_peer()->roundTripTime);
-                std::string ping_color = "`2";
-                if (ping_ms > 150) ping_color = "`6";
-                if (ping_ms > 300) ping_color = "`4";
-                ping_prefix = fmt::format("`0[{}{}``] ", ping_color, ping_ms);
-            }
-        }
-
-        auto get_roulette_color_code = [](int spin) -> std::string {
-            if (spin == 0) return "`2";
-            static const std::unordered_set<int> red_numbers = {
-                1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36
+        std::string full_name;
+        auto local_player = utils::PlayerTracker::get_instance().get_local_player();
+        if (netid == local_player.netID && core_) {
+            full_name = utils::DisplayManager::build_display_name(core_, base_name, netid);
+        } else {
+            auto host_flag = [&](const std::string& key, bool default_val = true) -> bool {
+                try { return core_->get_config().get<bool>(key); }
+                catch (...) { return default_val; }
             };
-            if (red_numbers.count(spin) > 0) return "`4";
-            return "`b";
-        };
 
-        std::string last_suffix;
-        if (host_flag("features.host.show_last_spin", true)) {
-            auto it = last_spin_by_netid_.find(netid);
-            if (it != last_spin_by_netid_.end()) {
-                int val = it->second;
-                std::string color = get_roulette_color_code(val);
-                last_suffix = " `w[" + color + std::to_string(val) + "`w]``";
+            std::string ping_prefix;
+            const bool show_ping = host_flag("display.show_ping", true) || host_flag("features.host.show_ping", true);
+            if (show_ping) {
+                auto* srv = core_ ? core_->get_server() : nullptr;
+                if (srv && srv->get_player() && srv->get_player()->get_peer()) {
+                    int ping_ms = static_cast<int>(srv->get_player()->get_peer()->roundTripTime);
+                    std::string ping_color = "`2";
+                    if (ping_ms > 150) ping_color = "`6";
+                    if (ping_ms > 300) ping_color = "`4";
+                    ping_prefix = fmt::format("`0[{}{}``] ", ping_color, ping_ms);
+                }
             }
-        }
 
-        std::string player_color = utils::PlayerTracker::get_instance().get_player_color(netid);
-        std::string clean_base = base_name;
-        if (clean_base.size() >= 2 && clean_base[0] == '`') {
-            clean_base = clean_base.substr(2);
-        }
+            auto get_roulette_color_code = [](int spin) -> std::string {
+                if (spin == 0) return "`2";
+                static const std::unordered_set<int> red_numbers = {
+                    1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36
+                };
+                if (red_numbers.count(spin) > 0) return "`4";
+                return "`b";
+            };
 
-        const std::string full_name = ping_prefix + player_color + clean_base + last_suffix;
+            std::string last_suffix;
+            if (host_flag("features.host.show_last_spin", true)) {
+                if (utils::PlayerTracker::get_instance().has_last_spin(netid)) {
+                    int val = utils::PlayerTracker::get_instance().get_last_spin(netid);
+                    std::string color = get_roulette_color_code(val);
+                    last_suffix = " `w[" + color + std::to_string(val) + "`w]``";
+                } else {
+                    auto it = last_spin_by_netid_.find(netid);
+                    if (it != last_spin_by_netid_.end()) {
+                        int val = it->second;
+                        std::string color = get_roulette_color_code(val);
+                        last_suffix = " `w[" + color + std::to_string(val) + "`w]``";
+                    }
+                }
+            }
+
+            std::string player_color = utils::PlayerTracker::get_instance().get_player_color(netid);
+            std::string clean_base = base_name;
+            if (clean_base.size() >= 2 && clean_base[0] == '`') {
+                clean_base = clean_base.substr(2);
+            }
+
+            full_name = ping_prefix + player_color + clean_base + last_suffix;
+        }
 
         packet::Variant var{};
         var.add("OnNameChanged");
@@ -163,11 +175,16 @@ public:
                 tick_counter_++;
                 
                 if (tick_counter_ % 60 == 0) {
-                    if (core_->get_config().get<bool>("display.show_ping")) {
+                    bool show_ping = false;
+                    try { show_ping = core_->get_config().get<bool>("display.show_ping"); } catch (...) {}
+                    if (show_ping) {
                         utils::DisplayManager::update_display(core_);
                     }
+                    
+                    auto local_info = utils::PlayerTracker::get_instance().get_local_player();
                     const auto all_players = utils::PlayerTracker::get_instance().get_all_players();
                     for (const auto& [nid, info] : all_players) {
+                        if (local_info.netID != 0 && nid == local_info.netID) continue;
                         if (!info.name.empty() && nid != 0) {
                             update_overhead_name_for(nid, info.name);
                         }
@@ -384,10 +401,14 @@ private:
                         bool has_maxlevel = core_->get_config().get<bool>("display.title.maxlevel");
                         bool has_dr = core_->get_config().get<bool>("display.title.dr");
                         bool has_mentor = core_->get_config().get<bool>("display.title.mentor");
-                        bool has_title = has_g4g || has_maxlevel || has_dr || has_mentor;
+                        bool has_legend = false;
+                        try { has_legend = core_->get_config().get<bool>("display.title.legend"); } catch (...) {}
+                        bool has_super_supporter = false;
+                        try { has_super_supporter = core_->get_config().get<bool>("display.title.super_supporter"); } catch (...) {}
+                        bool has_title = has_g4g || has_maxlevel || has_dr || has_mentor || has_legend || has_super_supporter;
                         
-                        spdlog::info("Display settings check: name='{}', ping={}, g4g={}, maxlevel={}, dr={}, mentor={}", 
-                                    saved_name, show_ping, has_g4g, has_maxlevel, has_dr, has_mentor);
+                        spdlog::info("Display settings check: name='{}', ping={}, g4g={}, maxlevel={}, dr={}, mentor={}, legend={}, super_supporter={}", 
+                                    saved_name, show_ping, has_g4g, has_maxlevel, has_dr, has_mentor, has_legend, has_super_supporter);
                         
                         
                         if (!saved_name.empty() || show_ping || has_title) {
@@ -896,6 +917,7 @@ private:
                                 uint32_t spinner_netid = find_netid_by_name(spin_name);
                                 if (spinner_netid != 0) {
                                     last_spin_by_netid_[spinner_netid] = spin_value;
+                                    utils::PlayerTracker::get_instance().set_last_spin(spinner_netid, spin_value);
                                     auto pinfo = utils::PlayerTracker::get_instance().get_player_by_netid(spinner_netid);
                                     if (!pinfo.name.empty()) {
                                         apply_last_suffix_for(spinner_netid, pinfo.name);
@@ -1271,6 +1293,7 @@ private:
                             bubble_text, instant, is_real, is_fake, netid, from_player_chat, recent_fake);
                         if (netid != 0) {
                             last_spin_by_netid_[netid] = spin_value;
+                            utils::PlayerTracker::get_instance().set_last_spin(netid, spin_value);
                             auto pinfo = utils::PlayerTracker::get_instance().get_player_by_netid(netid);
                             if (!pinfo.name.empty()) {
                                 apply_last_suffix_for(netid, pinfo.name);
@@ -1791,6 +1814,7 @@ private:
 
                         if (is_local) {
                             last_spin_by_netid_.clear();
+                            utils::PlayerTracker::get_instance().clear_last_spins();
                             pending_instant_spin_keys_.clear();
                             pending_instant_spin_values_.clear();
                             deferred_bubbles_.clear();
@@ -1811,9 +1835,13 @@ private:
                                 bool has_maxlevel = core_->get_config().get<bool>("display.title.maxlevel");
                                 bool has_dr = core_->get_config().get<bool>("display.title.dr");
                                 bool has_mentor = core_->get_config().get<bool>("display.title.mentor");
+                                bool has_legend = false;
+                                try { has_legend = core_->get_config().get<bool>("display.title.legend"); } catch (...) {}
+                                bool has_super_supporter = false;
+                                try { has_super_supporter = core_->get_config().get<bool>("display.title.super_supporter"); } catch (...) {}
                                 
-                                spdlog::info("[OnSpawn] Auto-applying ALL display settings: name='{}', ping={}, g4g={}, maxlevel={}, dr={}, mentor={}", 
-                                            saved_name, show_ping, has_g4g, has_maxlevel, has_dr, has_mentor);
+                                spdlog::info("[OnSpawn] Auto-applying ALL display settings: name='{}', ping={}, g4g={}, maxlevel={}, dr={}, mentor={}, legend={}, super_supporter={}", 
+                                            saved_name, show_ping, has_g4g, has_maxlevel, has_dr, has_mentor, has_legend, has_super_supporter);
                                 
                                 
                                 std::thread([this, netID, name]() {

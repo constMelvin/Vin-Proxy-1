@@ -16,6 +16,7 @@
 #include "title_command.hpp"
 #include "cleartitle_command.hpp"
 #include "mentor_command.hpp"
+#include "legend_command.hpp"
 #include "warn_command.hpp"
 #include "fakemaint_command.hpp"
 #include "join_command.hpp"
@@ -210,7 +211,7 @@ public:
         register_command(std::make_unique<command::DoorIDCommand>());
         register_command(std::make_unique<command::DatCommand>());
         register_command(std::make_unique<command::SpamCommand>());
-        register_command(std::make_unique<command::SpamTextCommand>());
+        register_command(std::make_unique<command::SpamToggleCommand>());
         register_command(std::make_unique<command::SpamDelayCommand>());
         register_command(std::make_unique<command::NameCommand>());
         register_command(std::make_unique<command::PingCommand>());
@@ -220,6 +221,7 @@ public:
         register_command(std::make_unique<command::MaxLevelCommand>());
         register_command(std::make_unique<command::DrCommand>());
         register_command(std::make_unique<command::MentorCommand>());
+        register_command(std::make_unique<command::LegendCommand>());
         register_command(std::make_unique<command::ClearTitleCommand>());
         register_command(std::make_unique<command::WarnCommand>());
         register_command(std::make_unique<command::FakeMaintCommand>());
@@ -348,6 +350,13 @@ public:
             core::EventType::Packet,
             [this](const core::EventPacket& event) {
                 handle_dialog_response(event);
+            }
+        );
+
+        core_->get_event_dispatcher().prependListener(
+            core::EventType::Tick,
+            [](const core::EventTick& /*event*/) {
+                command::SpamCommand::tick();
             }
         );
 
@@ -481,6 +490,8 @@ public:
                 clear_cmd->execute_with_core(client, args, core_);
             } else if (auto* mentor_cmd = dynamic_cast<command::MentorCommand*>(command.get())) {
                 mentor_cmd->execute_with_core(client, args, core_);
+            } else if (auto* legend_cmd = dynamic_cast<command::LegendCommand*>(command.get())) {
+                legend_cmd->execute_with_core(client, args, core_);
             } else if (auto* growscan_cmd = dynamic_cast<command::GrowScanCommand*>(command.get())) {
                 spdlog::info("[CMD DEBUG] Executing GrowScan command");
                 growscan_cmd->execute_with_core(client, args, core_);
@@ -557,41 +568,8 @@ public:
                     "end_dialog|info_gui|Close|Okay";
             }
             else if (dialog_type == "title") {
-                dialog_data = 
-                    "set_default_color|`o\n"
-                    "add_label_with_icon|big|`wTitle Manager``|left|5016|\n"
-                    "add_spacer|small|\n"
-                    "add_textbox|`oSelect a title below. Titles can be combined!``|left|\n"
-                    "add_spacer|small|\n"
-                    
-                    "add_label_with_icon|small|`2G4G Title``|left|11304|\n"
-                    "add_smalltext|`oShows the green [G4G] badge next to your name``|\n"
-                    "add_button|g4g|`2Apply G4G``|\n"
-                    "add_spacer|small|\n"
-                    
-                    "add_label_with_icon|small|`5Max Level Title``|left|11302|\n"
-                    "add_smalltext|`oShows the purple [125] level badge``|\n"
-                    "add_button|maxlv|`5Apply Max Level``|\n"
-                    "add_spacer|small|\n"
-                    
-                    "add_label_with_icon|small|`9Dr. Title``|left|11300|\n"
-                    "add_smalltext|`oAdds 'Dr.' prefix to your name with doctor badge``|\n"
-                    "add_button|dr|`9Apply Dr.``|\n"
-                    "add_spacer|small|\n"
-                    
-                    "add_label_with_icon|small|`6Mentor Title``|left|11298|\n"
-                    "add_smalltext|`oShows mentor badge with your name``|\n"
-                    "add_button|mentor|`6Apply Mentor``|\n"
-                    "add_spacer|small|\n"
-                    
-                    "add_label_with_icon|small|`4Clear All``|left|758|\n"
-                    "add_smalltext|`oRemove all titles and reset to original name``|\n"
-                    "add_button|cleartitle|`4Clear Titles``|\n"
-                    "add_spacer|small|\n"
-                    
-                    "add_textbox|`w💡 Tip: You can use multiple title commands to combine them!``|left|\n"
-                    "add_quick_exit|\n"
-                    "end_dialog|title_gui|Close||";
+                command::TitleCommand::send_title_gui(core_->get_client(), core_);
+                return;
             }
             else { 
                 dialog_data = 
@@ -657,11 +635,19 @@ private:
         
         
         if (action == "dialog_return") {
-            std::string dialog_name = text_parse.get("dialog_name");
-            std::string button_clicked = text_parse.get("buttonClicked");
+            std::string dialog_name = trim(text_parse.get("dialog_name"));
+            std::string button_clicked = trim(text_parse.get("buttonClicked"));
             
-            if (dialog_name == "title_gui") {
-                handle_title_gui_response(const_cast<player::Player*>(&event.get_player()), button_clicked);
+            if (dialog_name == "spam_dialog") {
+                command::SpamCommand::handle_dialog_return(const_cast<player::Player*>(&event.get_player()), button_clicked, text_parse);
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "popup" && (button_clicked == "pull" || button_clicked.find("pull") != std::string::npos)) {
+                command::SpamCommand::on_player_pulled();
+            }
+            else if (dialog_name == "title_gui") {
+                handle_title_gui_response(const_cast<player::Player*>(&event.get_player()), button_clicked, text_parse);
                 event.canceled = true;
                 return;
             }
@@ -798,6 +784,24 @@ private:
             spdlog::info("[CHAT] Raw command from client: '{}' (len={})", command_source, command_source.length());
             spdlog::info("[CHAT] After substr(1) and trim: '{}' (len={})", command_text, command_text.length());
             
+            if (command_text == "/" || command_text == "//") {
+                command::SpamCommand::toggle_spam();
+                auto* srv = core_->get_server();
+                if (srv && srv->get_player()) {
+                    if (command::SpamCommand::is_spamming()) {
+                        utils::PacketUtils::send_chat_message(srv->get_player(), " `9Spam is `2ON");
+                    } else {
+                        utils::PacketUtils::send_chat_message(srv->get_player(), " `9Spam is `4OFF");
+                    }
+                }
+                event.canceled = true;
+                return;
+            }
+            
+            if (command_text == "pull" || command_text.rfind("pull ", 0) == 0 || command_text == "pullall") {
+                command::SpamCommand::on_player_pulled();
+            }
+
             if (command_text == "info") {
                 send_gui_to_player(const_cast<player::Player*>(&event.get_player()), "info");
                 event.canceled = true;
@@ -834,6 +838,20 @@ private:
         else if (!command_source.empty() && action == "input") {
             std::string plain_text = trim(command_source);
             if (!plain_text.empty()) {
+                if (plain_text == "//") {
+                    command::SpamCommand::toggle_spam();
+                    auto* srv = core_->get_server();
+                    if (srv && srv->get_player()) {
+                        if (command::SpamCommand::is_spamming()) {
+                            utils::PacketUtils::send_chat_message(srv->get_player(), " `9Spam is `2ON");
+                        } else {
+                            utils::PacketUtils::send_chat_message(srv->get_player(), " `9Spam is `4OFF");
+                        }
+                    }
+                    event.canceled = true;
+                    return;
+                }
+
                 std::string lowered = plain_text;
                 std::transform(lowered.begin(), lowered.end(), lowered.begin(),
                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -1035,11 +1053,11 @@ private:
             }
 
             if (variant.size() >= 2 && variant.get<std::string>(0) == "OnDialogReturn") {
-                std::string dialog_name = variant.get<std::string>(1);
+                std::string dialog_name = trim(variant.get<std::string>(1));
                 std::string dialog_data = variant.get<std::string>(2);
                 TextParse text_parse{dialog_data};
                 
-                std::string button_clicked = text_parse.get("buttonClicked");
+                std::string button_clicked = trim(text_parse.get("buttonClicked"));
                 std::string world_name = text_parse.get("world_name");
                 
                 spdlog::info("[DIALOG] Received dialog return - name: '{}', button_clicked: '{}', data_size: {}", 
@@ -1059,7 +1077,7 @@ private:
                     handle_name_gui_response(const_cast<player::Player*>(&event.get_player()), button_clicked, text_parse);
                 }
                 else if (dialog_name == "title_gui") {
-                    handle_title_gui_response(const_cast<player::Player*>(&event.get_player()), button_clicked);
+                    handle_title_gui_response(const_cast<player::Player*>(&event.get_player()), button_clicked, text_parse);
                 }
                 else if (dialog_name == "host_settings") {
                     command::HostCommand::apply_dialog_settings(text_parse);
@@ -1078,6 +1096,9 @@ private:
                 }
                 else if (dialog_name == "clothes_dialog") {
                     command::ClothesCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), button_clicked, text_parse);
+                }
+                else if (dialog_name == "spam_dialog") {
+                    command::SpamCommand::handle_dialog_return(const_cast<player::Player*>(&event.get_player()), button_clicked, text_parse);
                 }
                 
                 
@@ -1156,63 +1177,75 @@ private:
         }
     }
 
-    void handle_title_gui_response(player::Player* player, const std::string& button_clicked) {
+    void handle_title_gui_response(player::Player* player, const std::string& button_clicked, TextParse& text_parse) {
         if (!player) return;
 
-        spdlog::info("Title GUI button clicked: '{}'", button_clicked);
+        spdlog::info("Title GUI button: '{}'", button_clicked);
 
         try {
             client::Client* client = core_->get_client();
             std::vector<std::string> empty_args;
-            
-            if (button_clicked == "g4g") {
-                spdlog::info("Applying G4G title via GUI");
-                if (auto it = commands_.find("g4g"); it != commands_.end()) {
-                    if (auto* g4g_cmd = dynamic_cast<command::G4GCommand*>(it->second.get())) {
-                        g4g_cmd->execute_with_core(client, empty_args, core_);
-                    } else {
-                        spdlog::error("G4G command found but cast failed");
-                    }
-                } else {
-                    spdlog::error("G4G command not found in commands map");
-                }
-            }
-            else if (button_clicked == "maxlv") {
-                spdlog::info("Applying MaxLevel title via GUI");
-                if (auto it = commands_.find("maxlevel"); it != commands_.end()) {
-                    if (auto* maxlv_cmd = dynamic_cast<command::MaxLevelCommand*>(it->second.get())) {
-                        maxlv_cmd->execute_with_core(client, empty_args, core_);
-                    }
-                }
-            }
-            else if (button_clicked == "dr") {
-                spdlog::info("Applying Dr. title via GUI");
-                if (auto it = commands_.find("dr"); it != commands_.end()) {
-                    if (auto* dr_cmd = dynamic_cast<command::DrCommand*>(it->second.get())) {
-                        dr_cmd->execute_with_core(client, empty_args, core_);
-                    }
-                }
-            }
-            else if (button_clicked == "mentor") {
-                spdlog::info("Applying Mentor title via GUI");
-                if (auto it = commands_.find("mentor"); it != commands_.end()) {
-                    if (auto* mentor_cmd = dynamic_cast<command::MentorCommand*>(it->second.get())) {
-                        mentor_cmd->execute_with_core(client, empty_args, core_);
-                    }
-                }
-            }
-            else if (button_clicked == "cleartitle") {
+
+            // "Reset All Titles" button
+            if (button_clicked == "cleartitle") {
                 spdlog::info("Clearing titles via GUI");
                 if (auto it = commands_.find("cleartitle"); it != commands_.end()) {
                     if (auto* clear_cmd = dynamic_cast<command::ClearTitleCommand*>(it->second.get())) {
                         clear_cmd->execute_with_core(client, empty_args, core_);
                     }
                 }
+                // Also clear new title flags
+                core_->get_config().set("display.title.legend", false);
+                core_->get_config().set("display.title.super_supporter", false);
+                command::TitleCommand::send_title_gui(client, core_);
+                return;
             }
-            else {
-                spdlog::warn("Unknown button clicked in title GUI: '{}'", button_clicked);
+
+            // Map button IDs to config keys for uniform toggle handling
+            static const std::vector<std::pair<std::string, std::string>> title_map = {
+                {"g4g",              "display.title.g4g"},
+                {"maxlv",            "display.title.maxlevel"},
+                {"dr",               "display.title.dr"},
+                {"mentor",           "display.title.mentor"},
+                {"legend",           "display.title.legend"},
+                {"super_supporter",  "display.title.super_supporter"},
+            };
+
+            for (const auto& [btn_id, config_key] : title_map) {
+                if (button_clicked == btn_id) {
+                    bool current = false;
+                    try { current = core_->get_config().get<bool>(config_key); }
+                    catch (...) {}
+
+                    core_->get_config().set(config_key, !current);
+
+                    // Apply display name with new settings
+                    auto& pt = utils::PlayerTracker::get_instance();
+                    auto pi = pt.get_local_player();
+                    if (pi.netID != 0) {
+                        utils::DisplayManager::apply_display_name(core_, pi.netID, pi.name);
+                    }
+
+                    std::string title_name = btn_id;
+                    if (btn_id == "g4g") title_name = "G4G";
+                    else if (btn_id == "maxlv") title_name = "Max Level";
+                    else if (btn_id == "dr") title_name = "Doctor";
+                    else if (btn_id == "mentor") title_name = "Mentor";
+                    else if (btn_id == "legend") title_name = "Legend";
+                    else if (btn_id == "super_supporter") title_name = "Super Supporter";
+
+                    std::string state = !current ? "`2enabled!" : "`4disabled.";
+                    utils::PacketUtils::send_chat_message(player,
+                        fmt::format("{} title {}", title_name, state));
+
+                    spdlog::info("Toggled title '{}' -> {}", btn_id, !current);
+                    command::TitleCommand::send_title_gui(client, core_);
+                    return;
+                }
             }
-            
+
+            spdlog::warn("Unknown title GUI button: '{}'", button_clicked);
+
         } catch (const std::exception& e) {
             spdlog::error("Error applying title: {}", e.what());
             utils::PacketUtils::send_chat_message(player, "`4Error applying title!");

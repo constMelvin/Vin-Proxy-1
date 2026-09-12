@@ -16,8 +16,6 @@ public:
     void execute(client::Client* client, const std::vector<std::string>& args) override;
     void execute_with_core(client::Client* client, const std::vector<std::string>& args, core::Core* core);
     std::unique_ptr<CommandBase> clone() const override;
-
-private:
     static void send_title_gui(client::Client* client, core::Core* core);
 };
 

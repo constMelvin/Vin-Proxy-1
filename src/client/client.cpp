@@ -823,18 +823,23 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                 auto replace_or_add_field = [](std::string& data, const std::string& field, const std::string& value) {
                                     std::string search_pattern = field + "|";
                                     size_t pos = data.find(search_pattern);
-                                    if (pos != std::string::npos) {
-                                        size_t value_start = pos + search_pattern.length();
-                                        size_t value_end = data.find('\n', value_start);
-                                        if (value_end == std::string::npos) {
-                                            value_end = data.length();
+                                    while (pos != std::string::npos) {
+                                        if (pos == 0 || data[pos - 1] == '\n') {
+                                            size_t value_start = pos + search_pattern.length();
+                                            size_t value_end = data.find('\n', value_start);
+                                            if (value_end == std::string::npos) {
+                                                value_end = data.length();
+                                            }
+                                            data.replace(value_start, value_end - value_start, value);
+                                            return;
                                         }
-                                        data.replace(value_start, value_end - value_start, value);
+                                        pos = data.find(search_pattern, pos + 1);
+                                    }
+                                    size_t type_pos = data.find("type|local");
+                                    if (type_pos != std::string::npos) {
+                                        data.insert(type_pos, field + "|" + value + "\n");
                                     } else {
-                                        size_t type_pos = data.find("type|local");
-                                        if (type_pos != std::string::npos) {
-                                            data.insert(type_pos, field + "|" + value + "\n");
-                                        }
+                                        data += "\n" + field + "|" + value;
                                     }
                                 };
                                 
@@ -842,13 +847,17 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                     std::string search_pattern = field + "|";
                                     size_t pos = data.find(search_pattern);
                                     while (pos != std::string::npos) {
-                                        size_t end_pos = data.find('\n', pos);
-                                        if (end_pos != std::string::npos) {
-                                            data.erase(pos, (end_pos - pos) + 1);
+                                        if (pos == 0 || data[pos - 1] == '\n') {
+                                            size_t end_pos = data.find('\n', pos);
+                                            if (end_pos != std::string::npos) {
+                                                data.erase(pos, (end_pos - pos) + 1);
+                                            } else {
+                                                data.erase(pos);
+                                            }
+                                            pos = data.find(search_pattern);
                                         } else {
-                                            data.erase(pos);
+                                            pos = data.find(search_pattern, pos + 1);
                                         }
-                                        pos = data.find(search_pattern);
                                     }
                                 };
                                 
@@ -857,18 +866,10 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                 replace_or_add_field(modified_data, "invis", invis_enabled ? "1" : "0");
                                 
                                 bool mstate_enabled = core_->get_config().get<bool>("player.mstate_enabled", false);
-                                if (mstate_enabled) {
-                                    replace_or_add_field(modified_data, "mstate", "1");
-                                } else {
-                                    remove_field(modified_data, "mstate");
-                                }
+                                replace_or_add_field(modified_data, "mstate", mstate_enabled ? "1" : "0");
 
                                 bool sm_enabled = core_->get_config().get<bool>("player.sm_enabled", false);
-                                if (sm_enabled) {
-                                    replace_or_add_field(modified_data, "smstate", "1");
-                                } else {
-                                    remove_field(modified_data, "smstate");
-                                }
+                                replace_or_add_field(modified_data, "smstate", sm_enabled ? "1" : "0");
                                 
                                 int title_icon = core_->get_config().get<int>("player.title_icon");
                                 if (title_icon > 0) {

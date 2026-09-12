@@ -58,6 +58,8 @@ void ClearTitleCommand::execute_with_core(client::Client* client, const std::vec
     core->get_config().set("display.title.maxlevel", false);
     core->get_config().set("display.title.dr", false);
     core->get_config().set("display.title.mentor", false);
+    core->get_config().set("display.title.legend", false);
+    core->get_config().set("display.title.super_supporter", false);
     core->get_config().set("display.visual_name", "");
 
     // 2. Send OnCountryState to reset title badges in GT client

@@ -23,6 +23,8 @@ static const std::map<std::string, ConfigStorage> config_defaults{
     { "display.title.maxlevel", false },
     { "display.title.dr", false },
     { "display.title.mentor", false },
+    { "display.title.legend", false },
+    { "display.title.super_supporter", false },
     { "display.show_ping", false },
     
     { "proxy.enabled",  false },
@@ -34,8 +36,11 @@ static const std::map<std::string, ConfigStorage> config_defaults{
     { "growtopia.auto_close", true },
     { "growtopia.path", std::string("") },
     { "pathfind.enabled", true },
-    { "pathfind.cooldown_ms", 2000 },
     { "gui.auto_show", false },
+    { "spam.text", std::string("HELLO") },
+    { "spam.delay_ms", 4000 },
+    { "spam.colored_text", false },
+    { "spam.auto_disable_pull", false },
 };
 
 Config::Config()

@@ -11,6 +11,7 @@
 #include "../../utils/display_manager.hpp"
 #include <fmt/format.h>
 #include <spdlog/spdlog.h>
+#include <sstream>
 
 namespace command {
 
@@ -53,47 +54,48 @@ void TitleCommand::send_title_gui(client::Client* client, core::Core* core) {
     spdlog::info("Building title GUI dialog...");
 
     try {
-        std::string title_dialog = 
-            "set_default_color|`o\n"
-            "add_label_with_icon|big|`wTitle Manager``|left|5016|\n"
-            "add_spacer|small|\n"
-            "add_textbox|`oSelect titles below. Titles can be combined!``|left|\n"
-            "add_spacer|small|\n"
-            
-            
-            "add_label_with_icon|small|`2G4G Title``|left|11304|\n"
-            "add_smalltext|`oShows the green [G4G] badge next to your name``|\n"
-            "add_button|g4g|`2Toggle G4G``|\n"
-            "add_spacer|small|\n"
-            
-            "add_label_with_icon|small|`5Max Level Title``|left|11302|\n"
-            "add_smalltext|`oShows the purple [125] level badge``|\n"
-            "add_button|maxlv|`5Toggle Max Level``|\n"
-            "add_spacer|small|\n"
-            
-            "add_label_with_icon|small|`9Dr. Title``|left|11300|\n"
-            "add_smalltext|`oAdds 'Dr.' prefix to your name with doctor badge``|\n"
-            "add_button|dr|`9Toggle Dr.``|\n"
-            "add_spacer|small|\n"
-            
-            "add_label_with_icon|small|`6Mentor Title``|left|11298|\n"
-            "add_smalltext|`oShows mentor badge next to your name``|\n"
-            "add_button|mentor|`6Toggle Mentor``|\n"
-            "add_spacer|small|\n"
-            
-            
-            "add_label_with_icon|small|`4Clear All``|left|758|\n"
-            "add_smalltext|`oRemove all titles and reset to original name``|\n"
-            "add_button|cleartitle|`4Clear Titles``|\n"
-            "add_spacer|small|\n"
-            
-            "add_textbox|`w💡 Tip: Toggle each title to combine them all!``|left|\n"
-            "add_quick_exit|\n"
-            "end_dialog|title_gui|Close||";
+        // Read Super Supporter state for toggle label
+        bool super_on = false;
+        try { super_on = core->get_config().get<bool>("display.title.super_supporter"); }
+        catch (...) {}
+
+        std::ostringstream dialog;
+        dialog << "set_default_color|`o\n";
+
+        // ── Header (Icon: 18 matches Newbie Proxy) ──
+        dialog << "add_label_with_icon|big|`pVisual Titles Page``|left|14186|\n";
+        dialog << "add_spacer|small|\n";
+        dialog << "add_textbox|`oClick on the `wicon`` `oto toggle a title on/off. Active titles will be displayed before your name.|left|\n";
+        dialog << "add_spacer|small|\n";
+
+        dialog << "add_label_with_icon_button|big|`wMax Level``|left|1488|maxlv|\n";
+        dialog << "add_spacer|small|\n";
+        dialog << "add_label_with_icon_button|big|`wDoctor``|left|7068|dr|\n";
+        dialog << "add_spacer|small|\n";
+        dialog << "add_label_with_icon_button|big|`wLegendary``|left|1794|legend|\n";
+        dialog << "add_spacer|small|\n";
+        dialog << "add_label_with_icon_button|big|`wGrow4Good``|left|11816|g4g|\n";
+        dialog << "add_spacer|small|\n";
+        dialog << "add_label_with_icon_button|big|`wMaster``|left|9472|mentor|\n";
+        dialog << "add_spacer|small|\n";
+        dialog << "add_label_with_icon_button|big|"
+               << (super_on ? "`4Disable `wSuper Supporter``" : "`2Enable `wSuper Supporter``")
+               << "|left|14360|super_supporter|\n";
+
+        dialog << "add_spacer|small|\n";
+
+        // ── Reset All Titles ──
+        dialog << "add_button|cleartitle|`pReset All Titles``|\n";
+
+        dialog << "add_spacer|small|\n";
+
+        // ── Footer ── Cancel / Okey matching screenshot
+        dialog << "add_quick_exit|\n";
+        dialog << "end_dialog|title_gui|Cancel|Okey|";
 
         packet::Variant variant{};
         variant.add("OnDialogRequest");
-        variant.add(title_dialog);
+        variant.add(dialog.str());
         
         std::vector<std::byte> ext_data = variant.serialize();
 
@@ -108,7 +110,6 @@ void TitleCommand::send_title_gui(client::Client* client, core::Core* core) {
         byte_stream.write(game_packet);
         byte_stream.write_data(ext_data.data(), ext_data.size());
 
-        
         server->get_player()->send_packet(byte_stream.get_data(), 0);
         
         spdlog::info("Title GUI sent to client successfully");

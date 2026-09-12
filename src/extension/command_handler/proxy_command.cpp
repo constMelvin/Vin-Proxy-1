@@ -182,9 +182,9 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"mod", "/ignorecsnchat", "", "Block CSN casino chat bubbles", "`4", "ignorecsnchat csn chat ignore mute"},
 
         // --- 6. Automation & Utility ---
-        {"auto", "/spam", "", "Toggle automated chat spammer ON/OFF", "`3", "spam autospam chat loop"},
-        {"auto", "/spamtext", "[text]", "Set message text for automated chat spammer", "`3", "spamtext text message spam"},
-        {"auto", "/spamdelay", "[sec]", "Set delay for automated chat spammer (min 2s)", "`3", "spamdelay delay interval spam"},
+        {"auto", "/spam", "", "Open Auto Spam settings dialog", "`3", "spam autospam chat dialog"},
+        {"auto", "//", "", "Toggle automated chat spammer ON/OFF", "`3", "spam toggle autospam chat loop"},
+        {"auto", "/spamdelay", "[ms]", "Set delay for automated chat spammer (ms)", "`3", "spamdelay delay interval spam"},
         {"auto", "/autosurg", "", "Toggle automated surgery bot", "`3", "autosurg surgery bot hospital surg"},
         {"auto", "/autocrime", "", "Toggle automated superhero crime solver", "`3", "autocrime crime bot superhero villain"},
         {"auto", "/gui", "", "Toggle desktop ImGui overlay control window", "`3", "gui imgui menu window overlay"},

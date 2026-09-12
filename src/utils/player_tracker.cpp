@@ -338,6 +338,7 @@ std::string PlayerTracker::get_device_from_platform_id(const std::string& platfo
 void PlayerTracker::clear() {
     std::lock_guard<std::mutex> lock(mutex_);
     players_.clear();
+    last_spins_.clear();
     local_player_netid_ = 0;
 }
 
