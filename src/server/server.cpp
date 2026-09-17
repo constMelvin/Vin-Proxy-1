@@ -15,6 +15,7 @@
 #include "../utils/world_manager.hpp"
 #include "../utils/player_tracker.hpp"
 #include "../packet/filter.hpp"
+#include "../packet/tank_packet.hpp"
 #include "../extension/command_handler/doorid_command.hpp"
 #include "../extension/command_handler/position_command.hpp"
 #include "../utils/items_dat_patcher.hpp"
@@ -369,8 +370,20 @@ void Server::on_receive(ENetPeer* peer, ENetPacket* packet)
                 return;
             }
 
-            
-            
+            // Tile punch hook for /spos1 and /spos2 commands
+            if ((game_update_packet.type == packet::PACKET_TILE_CHANGE_REQUEST ||
+                 game_update_packet.type == packet::PACKET_TILE_PUNCH ||
+                 game_update_packet.type == packet::PACKET_STATE) &&
+                (command::PositionCommand::is_spos1_waiting() || command::PositionCommand::is_spos2_waiting())) {
+                const auto& raw_bytes = byte_stream.get_data();
+                if (raw_bytes.size() >= start_pos + sizeof(packet::TankUpdatePacket)) {
+                    const auto* tank = reinterpret_cast<const packet::TankUpdatePacket*>(raw_bytes.data() + start_pos);
+                    if (tank->int_x >= 0 && tank->int_y >= 0) {
+                        command::PositionCommand::handle_punched_tile(tank->int_x, tank->int_y);
+                    }
+                }
+            }
+
             if (game_update_packet.type == packet::PACKET_USE_DOOR &&
                 command::DoorIDCommand::is_door_id_reveal_enabled()) {
                 try {

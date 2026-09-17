@@ -49,6 +49,8 @@ static void send_console(player::Player* p, const std::string& msg) {
 
 
 
+#include "../../utils/player_tracker.hpp"
+
 void AutoCollectCommand::send_collect_packet(player::Player* to_server, uint32_t uid, float x, float y) {
     if (!to_server) return;
 
@@ -64,10 +66,19 @@ void AutoCollectCommand::send_collect_packet(player::Player* to_server, uint32_t
     w1(0);     
     w1(0);     
     
-    
-    int netid = 0;
+    int netid = -1;
     if (AutoCollectCommand::s_core) {
-        netid = AutoCollectCommand::s_core->get_config().get<int>("player.netid");
+        try {
+            netid = AutoCollectCommand::s_core->get_config().get<int>("player.netid");
+        } catch (...) {}
+    }
+    if (netid <= 0) {
+        auto local = utils::PlayerTracker::get_instance().get_local_player();
+        if (local.netID != 0) {
+            netid = static_cast<int>(local.netID);
+        } else {
+            netid = -1;
+        }
     }
 
     w4i(netid); 
@@ -84,14 +95,13 @@ void AutoCollectCommand::send_collect_packet(player::Player* to_server, uint32_t
     w4i(0);    
     w4u(0);    
 
-    
     std::vector<std::byte> wire(60);
     uint32_t msg = 4;
     memcpy(wire.data(),    &msg, 4);
     memcpy(wire.data()+4,  buf, 56);
 
     to_server->send_packet(wire, 0);
-    spdlog::info("[AutoCollect] Network Send: Collect UID {} (Item ID unknown) using NetID {}", uid, netid);
+    spdlog::info("[AutoCollect] Network Send: Collect UID {} using NetID {}", uid, netid);
 }
 
 

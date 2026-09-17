@@ -57,7 +57,8 @@ static_assert(sizeof(MoriStatePacket) == 56, "MoriStatePacket must be 56 bytes")
 
 core::Core* FindPathCommand::s_core = nullptr;
 bool FindPathCommand::s_click_mode_enabled = true;
-int FindPathCommand::s_cooldown_ms = 2000;
+int FindPathCommand::s_cooldown_ms = 200;
+int FindPathCommand::s_blocks_per_step = 3;
 std::chrono::steady_clock::time_point FindPathCommand::s_last_tp_time{};
 std::atomic<uint64_t> FindPathCommand::s_current_path_id{0};
 uint32_t FindPathCommand::s_last_click_tile_x{0};
@@ -214,8 +215,12 @@ static bool is_tile_solid(uint32_t tile_x, uint32_t tile_y) {
     auto& world_mgr = utils::WorldManager::get_instance();
     uint32_t width = world_mgr.get_world_width();
     uint32_t height = world_mgr.get_world_height();
-    if (width == 0 || height == 0 || tile_x >= width || tile_y >= height) {
-        return false;
+    if (width == 0 || height == 0) {
+        width = 100;
+        height = 60;
+    }
+    if (tile_x >= width || tile_y >= height) {
+        return true; // Out of bounds is not passable
     }
 
     uint16_t fg = world_mgr.get_tile_fg(tile_x, tile_y);
@@ -239,7 +244,7 @@ static bool is_platform_id(uint16_t item_id) {
             item_id == 1114 || item_id == 1558 || item_id == 3230);
 }
 
-static bool is_tile_standable(uint32_t tile_x, uint32_t tile_y) {
+[[maybe_unused]] static bool is_tile_standable(uint32_t tile_x, uint32_t tile_y) {
     auto& world_mgr = utils::WorldManager::get_instance();
     uint32_t width = world_mgr.get_world_width();
     uint32_t height = world_mgr.get_world_height();
@@ -360,7 +365,7 @@ static bool is_tile_passable_for_reachability(uint32_t x, uint32_t y, uint32_t u
     return true;
 }
 
-static bool is_path_reachable_without_access(uint32_t start_x, uint32_t start_y, uint32_t target_x, uint32_t target_y, uint32_t user_id) {
+[[maybe_unused]] static bool is_path_reachable_without_access(uint32_t start_x, uint32_t start_y, uint32_t target_x, uint32_t target_y, uint32_t user_id) {
     auto& world_mgr = utils::WorldManager::get_instance();
     uint32_t width = world_mgr.get_world_width();
     uint32_t height = world_mgr.get_world_height();
@@ -432,7 +437,7 @@ static bool is_path_reachable_without_access(uint32_t start_x, uint32_t start_y,
     return false;
 }
 
-static TileBlockReason check_tile_blocked(uint32_t tile_x, uint32_t tile_y, uint32_t cur_tx, uint32_t cur_ty) {
+[[maybe_unused]] static TileBlockReason check_tile_blocked(uint32_t tile_x, uint32_t tile_y, uint32_t cur_tx, uint32_t cur_ty) {
     auto& world_mgr = utils::WorldManager::get_instance();
     uint32_t width = world_mgr.get_world_width();
     uint32_t height = world_mgr.get_world_height();
@@ -517,7 +522,8 @@ void FindPathCommand::set_core(core::Core* core) {
     s_core = core;
     if (s_core) {
         s_click_mode_enabled = s_core->get_config().get<bool>("pathfind.enabled", true);
-        s_cooldown_ms = s_core->get_config().get<int>("pathfind.cooldown_ms", 2000);
+        s_cooldown_ms = s_core->get_config().get<int>("pathfind.cooldown_ms", 200);
+        s_blocks_per_step = s_core->get_config().get<int>("pathfind.blocks_per_step", 3);
     }
 }
 
@@ -532,16 +538,112 @@ bool FindPathCommand::is_click_mode_enabled() {
 void FindPathCommand::toggle_click_mode() {
     s_click_mode_enabled = !s_click_mode_enabled;
     std::string msg = s_click_mode_enabled 
-        ? "`2Shift+Click pathfinding: `bON`2"
-        : "`4Shift+Click pathfinding: `9OFF";
+        ? "`2Enabled `9PathFinder `o(Hold `3SHIFT `o+ Click with Fist)"
+        : "`4Disabled `9PathFinder";
     if (s_core && s_core->get_server() && s_core->get_server()->get_player()) {
         send_console(s_core->get_server()->get_player(), msg);
+
+        // LuckyProxy: sendState(world.local.netid) after toggling pathfinder
+        auto local_player = utils::PlayerTracker::get_instance().get_local_player();
+        if (local_player.netID > 0) {
+            send_pathfinder_state(s_core->get_server()->get_player(), local_player.netID);
+        }
     }
     if (s_core) {
         s_core->get_config().set<bool>("pathfind.enabled", s_click_mode_enabled);
         s_core->get_config().save();
     }
     spdlog::info("[ClickMode] {}", msg);
+}
+
+// ============================================================================
+// LuckyProxy send_state() — exact port from server.cpp:231-281
+// Sends PACKET_SET_CHARACTER_STATE (type 20) to the LOCAL client with
+// build_range=128/255 and punch_range=128, enabling full-screen click reach.
+// This packet is sent ONLY downstream (proxy -> client), never to the server.
+// ============================================================================
+void FindPathCommand::send_pathfinder_state(player::Player* client_player, uint32_t net_id) {
+    if (!client_player) return;
+
+    // 1. Send OnSuperSupportState variant so client immediately enables super supporter / long punch in real time
+    {
+        packet::Variant var{};
+        var.add("OnSuperSupportState");
+        var.add(1);
+
+        std::vector<std::byte> ext_data = var.serialize();
+        packet::GameUpdatePacket pkt{};
+        pkt.type = packet::PACKET_CALL_FUNCTION;
+        pkt.net_id = static_cast<int32_t>(net_id);
+        pkt.flags.extended = 1;
+        pkt.data_size = static_cast<uint32_t>(ext_data.size());
+
+        ByteStream<std::uint16_t> v_bs{};
+        v_bs.write(packet::NET_MESSAGE_GAME_PACKET);
+        v_bs.write(pkt);
+        v_bs.write_data(ext_data.data(), ext_data.size());
+        client_player->send_packet(v_bs.get_data(), 0);
+    }
+
+    // 2. Build the raw 56-byte packet exactly like LuckyProxy's send_state:
+    uint8_t data[56];
+    memset(data, 0, 56);
+
+    // type = PACKET_SET_CHARACTER_STATE (20 / 0x14)
+    int type = static_cast<int>(packet::PACKET_SET_CHARACTER_STATE);
+    memcpy(data + 0, &type, 4);
+
+    // net_id
+    int32_t nid = static_cast<int32_t>(net_id);
+    memcpy(data + 4, &nid, 4);
+
+    // charstate / flags = 0
+    int charstate = 0;
+    memcpy(data + 12, &charstate, 4);
+
+    // int_data (plantingtree) — double jump bit and super supporter bit (matching LuckyProxy server.cpp:254)
+    int state = 0;
+    state |= (1 << 1);  // double jump enabled
+    state |= (1 << 24); // super supporter enabled (LuckyProxy ssup << 24)
+    memcpy(data + 20, &state, 4);
+
+    // vec_x = punch reach x, vec_y = punch reach y
+    float x = 1000.0f;
+    float y = 400.0f;
+    memcpy(data + 24, &x, 4);
+    memcpy(data + 28, &y, 4);
+
+    // vec_x2 = horizontal speed, vec_y2 = gravity
+    float xspeed = 250.0f;
+    float yspeed = 1000.0f;
+    memcpy(data + 32, &xspeed, 4);
+    memcpy(data + 36, &yspeed, 4);
+
+    // punchx, punchy = 0
+    int punchx = 0, punchy = 0;
+    memcpy(data + 44, &punchx, 4);
+    memcpy(data + 48, &punchy, 4);
+
+    // LuckyProxy: build_range (byte 2) and punch_range (byte 3)
+    // When pathfinder is ON: build_range = 255 (-1 as uint8_t), punch_range = 128
+    // When pathfinder is OFF but still sending state: build_range = 128, punch_range = 128
+    uint8_t build_range = s_click_mode_enabled ? static_cast<uint8_t>(255) : 128;
+    uint8_t punch_range = 128;
+    memcpy(data + 2, &build_range, 1);
+    memcpy(data + 3, &punch_range, 1);
+
+    // float_var (waterspeed) = 200.0f
+    float waterspeed = 200.0f;
+    memcpy(data + 16, &waterspeed, 4);
+
+    // Send to local client via proxy (SendPacketRaw(true, 4, data, 56, ...))
+    ByteStream<std::uint16_t> bs{};
+    bs.write(packet::NET_MESSAGE_GAME_PACKET);
+    bs.write_data(reinterpret_cast<const std::byte*>(data), 56);
+    client_player->send_packet(bs.get_data(), 0);
+
+    spdlog::info("[FindPath] Sent pathfinder state & OnSuperSupportState to client (netID={}, build_range={}, punch_range={})",
+                 net_id, (int)build_range, (int)punch_range);
 }
 
 int FindPathCommand::get_cooldown_ms() {
@@ -552,7 +654,7 @@ void FindPathCommand::set_cooldown_ms(int ms) {
     if (ms <= 0) {
         s_cooldown_ms = 0;
     } else {
-        s_cooldown_ms = std::clamp(ms, 100, 10000);
+        s_cooldown_ms = ms;
     }
     if (s_core) {
         s_core->get_config().set<int>("pathfind.cooldown_ms", s_cooldown_ms);
@@ -572,8 +674,8 @@ bool FindPathCommand::should_suppress_onsetpos(float server_x, float server_y) {
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - s_last_tp_time).count();
 
-    // Suppress if sync is actively running OR within 5000ms following teleport completion
-    if (!s_sync_in_progress.load() && elapsed > 5000) {
+    // Suppress if sync is actively running OR within 4000ms following teleport completion
+    if (!s_sync_in_progress.load() && elapsed > 4000) {
         return false;
     }
 
@@ -595,6 +697,10 @@ void FindPathCommand::update_last_target_pos(float px, float py) {
     if (s_sync_in_progress.load()) return;
     if (s_last_target_px < 0.0f || s_last_target_py < 0.0f) return;
 
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - s_last_tp_time).count();
+    if (elapsed < 300) return;
+
     float dx = px - s_last_target_px;
     float dy = py - s_last_target_py;
     float dist_sq = dx * dx + dy * dy;
@@ -605,36 +711,19 @@ void FindPathCommand::update_last_target_pos(float px, float py) {
     }
 }
 
-static constexpr int SAFETY_DELAY_MS = 2000;
-
 void FindPathCommand::show_settings_dialog(player::Player* player) {
     if (!player) return;
 
+    // Exact LuckyProxy dialog design (events.cpp:7375-7387)
     std::string is_enabled_str = s_click_mode_enabled ? "1" : "0";
-    std::string status_color = s_click_mode_enabled ? "`2" : "`4";
-    std::string status_text = s_click_mode_enabled ? "ON" : "OFF";
-
-    bool delay_active = (s_cooldown_ms > 0);
-    std::string is_delay_str = delay_active ? "1" : "0";
-    std::string delay_status = delay_active 
-        ? fmt::format("`2Safety Delay Active ({}ms / 2.0s)``", s_cooldown_ms) 
-        : "`4No Delay (Instant Teleport)``";
-
     std::string dialog = 
-        "set_default_color|`o\n"
-        "add_label_with_icon|big|`wPathfinding Settings``|left|32|\n"
-        "add_spacer|small|\n"
-        "add_textbox|`oCurrent Status: " + status_color + status_text + "``|left|\n"
-        "add_checkbox|pathfind_enable|`oEnable Pathfinding|" + is_enabled_str + "|\n"
-        "add_spacer|small|\n"
-        "add_textbox|`4WARNING: Teleport is bannable!``|left|\n"
-        "add_textbox|`oInstant teleport without delay increases server ban risk. Use safety delay to reduce ban risk.``|left|\n"
-        "add_spacer|small|\n"
-        "add_checkbox|pathfind_delay_enable|`oEnable Pathfinding Delay (2s Safety Delay)|" + is_delay_str + "|\n"
-        "add_textbox|`oCurrent Mode: " + delay_status + "|left|\n"
-        "add_spacer|small|\n"
-        "add_button|apply_pathfind|`2Apply Settings``|\n"
-        "end_dialog|pathfind_gui|Close||";
+        "add_label_with_icon|big|`2Pathfinder Options|left|7064|\n"
+        "add_smalltext|`9The `5Teleport Delay`9 and `5Blocks Per Teleport`9 Really varies on your ping.|\n"
+        "add_smalltext|`9For Example if your ping is about 150ms having low `5Teleport Delay`9 Might `4Ban `9you.|\n"
+        "add_text_input|pf_blocks|Blocks Per Teleport|" + std::to_string(s_blocks_per_step) + "|3|\n"
+        "add_text_input|pf_timer|Teleport Delay|" + std::to_string(s_cooldown_ms) + "|4|\n"
+        "add_checkbox|idupinpf1|`2Enable `9Pathfinder|" + is_enabled_str + "|\n"
+        "end_dialog|pf_options|Cancel|Save|\n";
 
     packet::Variant var{};
     var.add("OnDialogRequest");
@@ -653,7 +742,7 @@ void FindPathCommand::show_settings_dialog(player::Player* player) {
     bs.write_data(ext_data.data(), ext_data.size());
 
     player->send_packet(bs.get_data(), 0);
-    spdlog::info("[PathGUI] Settings dialog sent to player");
+    spdlog::info("[PathGUI] LuckyProxy-style settings dialog sent to player");
 }
 
 void FindPathCommand::handle_dialog_response(player::Player* player, const std::string& button_clicked, const std::string& dialog_data) {
@@ -661,50 +750,79 @@ void FindPathCommand::handle_dialog_response(player::Player* player, const std::
 
     spdlog::info("[PathGUI] Dialog response - button='{}', data='{}'", button_clicked, dialog_data);
 
-    if (button_clicked == "apply_pathfind" || button_clicked.empty()) {
-        apply_dialog_settings(dialog_data);
-        show_settings_dialog(player);
+    if (button_clicked == "Cancel" || button_clicked == "back_pathfind") {
         return;
     }
-    if (button_clicked == "back_pathfind") {
-        return;
-    }
+
+    apply_dialog_settings(dialog_data);
 }
 
 void FindPathCommand::apply_dialog_settings(const std::string& dialog_data) {
     TextParse tp{dialog_data};
 
-    // 1. Apply Enable / Disable checkbox state
-    std::string enable_val = tp.get("pathfind_enable");
+    // 1. Blocks per teleport (pf_blocks)
+    std::string blocks_val = tp.get("pf_blocks");
+    if (!blocks_val.empty()) {
+        try {
+            int blocks = std::stoi(blocks_val);
+            if (blocks > 0 && blocks <= 20) {
+                s_blocks_per_step = blocks;
+            }
+        } catch (...) {}
+    }
+
+    // 2. Custom delay in ms (pf_timer)
+    std::string timer_val = tp.get("pf_timer");
+    if (!timer_val.empty()) {
+        try {
+            int timer = std::stoi(timer_val);
+            if (timer >= 0) {
+                s_cooldown_ms = timer;
+            }
+        } catch (...) {}
+    }
+
+    // 3. Enable / Disable Pathfinder checkbox (idupinpf1)
+    std::string enable_val = tp.get("idupinpf1");
+    if (enable_val.empty()) {
+        enable_val = tp.get("pathfind_enable"); // backward compatibility
+    }
     if (!enable_val.empty()) {
         s_click_mode_enabled = (enable_val == "1");
     }
 
-    // 2. Apply Pathfinding Delay checkbox state:
-    // If checked -> safety delay (2000ms / 2.0s). If unchecked -> 0ms (no delay / instant).
-    std::string delay_val = tp.get("pathfind_delay_enable");
-    if (!delay_val.empty()) {
-        bool delay_enabled = (delay_val == "1");
-        s_cooldown_ms = delay_enabled ? SAFETY_DELAY_MS : 0;
+    // Backward compatibility for old delay checkbox
+    std::string old_delay_val = tp.get("pathfind_delay_enable");
+    if (!old_delay_val.empty() && timer_val.empty()) {
+        s_cooldown_ms = (old_delay_val == "1") ? 200 : 0;
     }
 
-    // 3. Save to config.json
+    // 4. Save to config.json
     if (s_core) {
         s_core->get_config().set<bool>("pathfind.enabled", s_click_mode_enabled);
         s_core->get_config().set<int>("pathfind.cooldown_ms", s_cooldown_ms);
+        s_core->get_config().set<int>("pathfind.blocks_per_step", s_blocks_per_step);
         s_core->get_config().save();
     }
 
-    // 4. Send console confirmation message
-    std::string status_str = s_click_mode_enabled ? "`2ON" : "`4OFF";
-    std::string delay_str = (s_cooldown_ms > 0) 
-        ? fmt::format("`2Safety Delay ({}ms / 2.0s)", s_cooldown_ms) 
-        : "`4No Delay (Instant)";
+    // 5. If enabled, update local player state
+    if (s_click_mode_enabled && s_core && s_core->get_server() && s_core->get_server()->get_player()) {
+        auto local_player = utils::PlayerTracker::get_instance().get_local_player();
+        if (local_player.netID > 0) {
+            send_pathfinder_state(s_core->get_server()->get_player(), local_player.netID);
+        }
+    }
+
+    // 6. Send feedback to console
+    std::string status_str = s_click_mode_enabled 
+        ? "`2Enabled `9PathFinder `o(Hold `3SHIFT `o+ Click with Fist)"
+        : "`4Disabled `9PathFinder";
     if (s_core && s_core->get_server() && s_core->get_server()->get_player()) {
         send_console(s_core->get_server()->get_player(), 
-            fmt::format("`2Pathfinding settings applied! Status: {}`2, Delay: {}`2.", status_str, delay_str));
+            fmt::format("{} `9| Delay: `b{}ms `9| Step: `b{} blocks", status_str, s_cooldown_ms, s_blocks_per_step));
     }
-    spdlog::info("[PathGUI] Settings applied: enabled={}, cooldown={}ms", s_click_mode_enabled, s_cooldown_ms);
+    spdlog::info("[PathGUI] Settings applied: enabled={}, cooldown={}ms, blocks={}", 
+                 s_click_mode_enabled, s_cooldown_ms, s_blocks_per_step);
 }
 
 int FindPathCommand::run_path(client::Client* client, uint32_t target_x, uint32_t target_y, bool show_console, int delay_ms, uint64_t path_id) {
@@ -723,7 +841,13 @@ int FindPathCommand::run_path(client::Client* client, uint32_t target_x, uint32_
         return -1;
     }
 
-    
+    // RAII guard to safely track active position sync walk
+    struct SyncGuard {
+        std::atomic<bool>& flag;
+        SyncGuard(std::atomic<bool>& f) : flag(f) { flag.store(true); }
+        ~SyncGuard() { flag.store(false); }
+    } sync_guard(s_sync_in_progress);
+
     std::string pos_x_str = s_core->get_config().get<std::string>("player.position.x");
     std::string pos_y_str = s_core->get_config().get<std::string>("player.position.y");
     
@@ -786,25 +910,27 @@ int FindPathCommand::run_path(client::Client* client, uint32_t target_x, uint32_
     }
 
     
+    // Check if target is solid / not passable
+    if (is_tile_solid(target_x, target_y)) {
+        if (show_console) send_console(server->get_player(), "`4Target position is solid / not passable!");
+        send_overlay(server->get_player(), "`4Blocked: Target position is solid!``");
+        return -1;
+    }
+
     if (current_x < WORLD_WIDTH && current_y < WORLD_HEIGHT) {
         collision_data[static_cast<size_t>(current_y) * WORLD_WIDTH + current_x] = 0;
-    }
-    if (target_x < WORLD_WIDTH && target_y < WORLD_HEIGHT) {
-        collision_data[static_cast<size_t>(target_y) * WORLD_WIDTH + target_x] = 0;
     }
 
     astar.set_collision_data(collision_data);
     spdlog::debug("[Path] Collision map loaded from world tiles: {} entries", collision_data.size());
     
-    
     bool has_access = true;  
-    
 
-    
     auto path = astar.find_path(current_x, current_y, target_x, target_y, has_access);
     
     if (path.empty()) {
-        if (show_console) send_console(server->get_player(), "`4No path found!");
+        if (show_console) send_console(server->get_player(), "`4No passable path found!");
+        send_overlay(server->get_player(), "`9Path Not Found");
         spdlog::warn("[Path] No path from ({},{}) to ({},{})", 
                     current_x, current_y, target_x, target_y);
         return -1;
@@ -828,7 +954,7 @@ int FindPathCommand::run_path(client::Client* client, uint32_t target_x, uint32_
     }
 
     
-    int findpath_delay_ms = s_core->get_config().get<int>("command.path.delay_ms", 55);
+    int findpath_delay_ms = 12;
     if (delay_ms >= 0) {
         findpath_delay_ms = delay_ms;
     }
@@ -889,17 +1015,187 @@ int FindPathCommand::run_path(client::Client* client, uint32_t target_x, uint32_
 
         
         if (going_up) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
             client->get_player()->send_packet_unreliable(bs.get_data(), 0);
         }
+
+        // Periodically update local client view during the walk so player sees smooth movement
+        if (server && server->get_player() && (i % 3 == 0 || i + 1 == waypoints.size())) {
+            SetPosCommand::set_position(server->get_player(), static_cast<uint32_t>(-1), current_px, current_py);
+            if (player_netid > 0) {
+                SetPosCommand::set_position(server->get_player(), player_netid, current_px, current_py);
+            }
+        }
+
         spdlog::info("[Path] Step {}/{} -> tile ({},{}) mode=state", i + 1, waypoints.size(), node.x, node.y);
         std::this_thread::sleep_for(std::chrono::milliseconds(findpath_delay_ms));
+    }
+
+    const float final_px = static_cast<float>(target_x * 32);
+    const float final_py = static_cast<float>(target_y * 32);
+
+    uint32_t player_netid = 0;
+    auto local = utils::PlayerTracker::get_instance().get_local_player();
+    if (local.netID != 0) {
+        player_netid = local.netID;
+    }
+
+    // Firmly lock local client position & tracker to destination
+    if (server && server->get_player()) {
+        SetPosCommand::set_position(server->get_player(), static_cast<uint32_t>(-1), final_px, final_py);
+        if (player_netid > 0) {
+            SetPosCommand::set_position(server->get_player(), player_netid, final_px, final_py);
+            utils::PlayerTracker::get_instance().update_player_position(player_netid, final_px, final_py);
+        }
+    }
+
+    if (s_core) {
+        s_core->get_config().set<std::string>("player.position.x", std::to_string(final_px));
+        s_core->get_config().set<std::string>("player.position.y", std::to_string(final_py));
+        s_core->get_config().save();
     }
 
     if (show_console) {
         send_console(server->get_player(), "`2Path walk complete!");
     }
     return static_cast<int>(waypoints.size());
+}
+
+void FindPathCommand::execute_lucky_move_xy(client::Client* client, server::Server* server, uint32_t active_netid,
+                                            uint32_t start_tx, uint32_t start_ty, uint32_t target_tx, uint32_t target_ty,
+                                            uint32_t width, uint32_t height, uint64_t my_path_id)
+{
+    if (!client || !client->get_player() || !server || !server->get_player()) return;
+
+    // Block pathfinding if target is solid / not passable
+    if (is_tile_solid(target_tx, target_ty)) {
+        send_overlay(server->get_player(), "`4Blocked: Target position is solid / not passable!``");
+        spdlog::info("Blocked pathfinding: target ({},{}) is solid / not passable", target_tx, target_ty);
+        return;
+    }
+
+    // 1. Build collision data & run A* (LuckyProxy MoveXY logic)
+    pathfinding::AStar astar(width, height);
+    std::vector<uint8_t> collision_data(static_cast<size_t>(width) * height, 0);
+
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            size_t i = static_cast<size_t>(y) * width + x;
+            collision_data[i] = is_tile_solid(x, y) ? 1 : 0;
+        }
+    }
+    if (start_tx < width && start_ty < height) collision_data[start_ty * width + start_tx] = 0;
+
+    astar.set_collision_data(collision_data);
+    auto raw_path = astar.find_path(start_tx, start_ty, target_tx, target_ty, true);
+
+    std::vector<std::pair<int, int>> path;
+    for (const auto& node : raw_path) {
+        path.push_back({static_cast<int>(node.x), static_cast<int>(node.y)});
+    }
+
+    // LuckyProxy auto-ban block limit:
+    if (path.size() >= 1000) {
+        send_overlay(server->get_player(),
+            fmt::format("`9Blocked Pathfinding To Avoid Auto-Ban! Blocked -> {} Blocks.", path.size()));
+        return;
+    }
+
+    if (path.empty()) {
+        send_overlay(server->get_player(), "`9Path Not Found");
+        spdlog::info("No passable path found from ({},{}) to ({},{})",
+                     start_tx, start_ty, target_tx, target_ty);
+        return;
+    }
+
+    const float final_px = static_cast<float>(target_tx * 32);
+    const float final_py = static_cast<float>(target_ty * 32);
+    s_last_target_px = final_px;
+    s_last_target_py = final_py;
+
+    auto start_time = std::chrono::steady_clock::now();
+
+    // 2. Traversal loop with LuckyProxy packet logic:
+    // int_data = 822, moving flags (48 for left, 32 for right), 2ms delay between packets.
+    // If path size >= 150, stride by s_blocks_per_step (default 3 or 4) as in LuckyProxy.
+    size_t step = (s_blocks_per_step > 0) ? static_cast<size_t>(s_blocks_per_step) : 4;
+    if (path.size() < 150) {
+        for (const auto& p : path) {
+            if (my_path_id != 0 && s_current_path_id != my_path_id) return;
+
+            MoriStatePacket packet{ 0 };
+            packet.type = static_cast<uint8_t>(packet::PACKET_STATE);
+            packet.value = 822; // LuckyProxy signature packet value
+            packet.vector_x = static_cast<float>(p.first * 32);
+            packet.vector_y = static_cast<float>(p.second * 32);
+            packet.int_x = p.first;
+            packet.int_y = p.second;
+            packet.net_id = active_netid;
+            packet.flags = (start_tx > target_tx) ? 48u : 32u; // 48 = left, 32 = right
+
+            ByteStream<std::uint16_t> bs{};
+            bs.write(packet::NET_MESSAGE_GAME_PACKET);
+            bs.write(packet);
+            client->get_player()->send_packet(bs.get_data(), 0);
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+    } else {
+        for (size_t i = 0; i < path.size(); i += step) {
+            if (my_path_id != 0 && s_current_path_id != my_path_id) return;
+
+            const auto& p = path[i];
+            MoriStatePacket packet{ 0 };
+            packet.type = static_cast<uint8_t>(packet::PACKET_STATE);
+            packet.value = 822;
+            packet.vector_x = static_cast<float>(p.first * 32);
+            packet.vector_y = static_cast<float>(p.second * 32);
+            packet.int_x = p.first;
+            packet.int_y = p.second;
+            packet.net_id = active_netid;
+            packet.flags = (start_tx > target_tx) ? 48u : 32u;
+
+            ByteStream<std::uint16_t> bs{};
+            bs.write(packet::NET_MESSAGE_GAME_PACKET);
+            bs.write(packet);
+            client->get_player()->send_packet(bs.get_data(), 0);
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+
+    // 3. Final snap: Send OnSetPos to local client (LuckyProxy: send(true, lost, netid, -1))
+    SetPosCommand::set_position(server->get_player(), static_cast<uint32_t>(-1), final_px, final_py);
+    if (active_netid > 0) {
+        SetPosCommand::set_position(server->get_player(), active_netid, final_px, final_py);
+        utils::PlayerTracker::get_instance().update_player_position(active_netid, final_px, final_py);
+    }
+
+    if (s_core) {
+        s_core->get_config().set<std::string>("player.position.x", std::to_string(final_px));
+        s_core->get_config().set<std::string>("player.position.y", std::to_string(final_py));
+        s_core->get_config().save();
+    }
+
+    // 4. Send notification overlay with ACTUAL traveling duration
+    auto end_time = std::chrono::steady_clock::now();
+    double actual_seconds = std::chrono::duration<double>(end_time - start_time).count();
+
+    std::ostringstream stream;
+    if (actual_seconds < 0.1) {
+        stream << std::fixed << std::setprecision(2) << actual_seconds;
+    } else {
+        stream << std::fixed << std::setprecision(1) << actual_seconds;
+    }
+    std::string formattedTime = stream.str();
+
+    send_overlay(server->get_player(),
+        fmt::format("`^Traveling `9{} `^Blocks `9({}`9sec)``", path.size() - 1, formattedTime));
+
+    spdlog::info("Traveled {} blocks to ({},{}) in {}sec",
+        path.size() - 1, target_tx, target_ty, formattedTime);
 }
 
 bool FindPathCommand::handle_shift_click(client::Client* client, uint32_t tile_x, uint32_t tile_y) {
@@ -924,83 +1220,10 @@ bool FindPathCommand::handle_shift_click(client::Client* client, uint32_t tile_x
         return true;
     }
 
-    // Cooldown check between new clicks: only enforce if cooldown is explicitly configured > 0
-    if (s_cooldown_ms > 0 && elapsed_ms < s_cooldown_ms) {
-        send_overlay(server->get_player(), "`6Waiting for next Pathfinding.");
-        return true;
-    }
-
-    // Retrieve current position first so we can check current position vs target lock
-    float cur_px = 0.0f, cur_py = 0.0f;
-    bool has_pos = false;
-
-    auto local = utils::PlayerTracker::get_instance().get_local_player();
-    uint32_t netid = local.netID;
-    if (netid > 0) {
-        auto ppos = utils::PlayerTracker::get_instance().get_player_position(netid);
-        if (ppos.x > 0.0f || ppos.y > 0.0f) {
-            cur_px = ppos.x;
-            cur_py = ppos.y;
-            has_pos = true;
-        }
-    }
-
-    if (!has_pos && s_core) {
-        std::string pos_x_str = s_core->get_config().get<std::string>("player.position.x");
-        std::string pos_y_str = s_core->get_config().get<std::string>("player.position.y");
-        try {
-            if (!pos_x_str.empty() && !pos_y_str.empty()) {
-                cur_px = std::stof(pos_x_str);
-                cur_py = std::stof(pos_y_str);
-                if (cur_px > 0.0f || cur_py > 0.0f) has_pos = true;
-            }
-        } catch (...) {}
-    }
-
-    if (!has_pos) {
-        cur_px = static_cast<float>(tile_x * 32);
-        cur_py = static_cast<float>(tile_y * 32);
-    }
-
-    uint32_t start_tx = static_cast<uint32_t>(cur_px / 32.0f);
-    uint32_t start_ty = static_cast<uint32_t>(cur_py / 32.0f);
-
-    if (start_tx == tile_x && start_ty == tile_y) {
-        return true;
-    }
-
-    uint16_t debug_fg = utils::WorldManager::get_instance().get_tile_fg(tile_x, tile_y);
-    bool debug_solid = is_tile_solid(tile_x, tile_y);
-    spdlog::info("[SHIFT-CLICK CHECK] tile=({},{}) cur=({},{}) fg={} solid={}", 
-        tile_x, tile_y, start_tx, start_ty, debug_fg, debug_solid);
-
-    // Prevent teleport if target spot is not passable, a solid block, a lock spot, or locked without access
-    auto block_reason = check_tile_blocked(tile_x, tile_y, start_tx, start_ty);
-    if (block_reason != TileBlockReason::PASSABLE) {
-        spdlog::info("[SHIFT-CLICK CANCELLED] tile=({},{}) reason={}", tile_x, tile_y, static_cast<int>(block_reason));
-        switch (block_reason) {
-            case TileBlockReason::OUT_OF_BOUNDS:
-                send_overlay(server->get_player(), "`4Teleport cancelled: target is out of bounds!");
-                break;
-            case TileBlockReason::LOCK_SPOT:
-                send_overlay(server->get_player(), "`4Teleport cancelled: target spot is a lock!");
-                break;
-            case TileBlockReason::NO_LOCK_ACCESS:
-                send_overlay(server->get_player(), "`4Teleport cancelled: you don't have access to this lock!");
-                break;
-            case TileBlockReason::NO_PATH_WITHOUT_ACCESS:
-                send_overlay(server->get_player(), "`4Teleport cancelled: path is blocked and you have no access!");
-                break;
-            case TileBlockReason::GATE_NOT_PUBLIC:
-                send_overlay(server->get_player(), "`4Teleport cancelled: entrance gate is closed and you have no access!");
-                break;
-            case TileBlockReason::SOLID_BLOCK:
-                send_overlay(server->get_player(), "`4Teleport cancelled: target is a solid block!");
-                break;
-            default:
-                send_overlay(server->get_player(), "`4Teleport cancelled: target spot is not passable!");
-                break;
-        }
+    // LuckyProxy cooldown check: custom delay
+    uint32_t cd = (s_cooldown_ms >= 0) ? static_cast<uint32_t>(s_cooldown_ms) : 200u;
+    if (cd > 0 && elapsed_ms < cd) {
+        send_overlay(server->get_player(), "`9Wait before pathfinding again ");
         return true;
     }
 
@@ -1008,75 +1231,61 @@ bool FindPathCommand::handle_shift_click(client::Client* client, uint32_t tile_x
     s_last_click_tile_y = tile_y;
     s_last_tp_time = now;
 
-    const float target_px = static_cast<float>(tile_x * 32);
-    const float target_py = static_cast<float>(tile_y * 32);
+    // Clamp coordinates to world boundaries
+    auto& world_mgr = utils::WorldManager::get_instance();
+    uint32_t width = world_mgr.get_world_width();
+    uint32_t height = world_mgr.get_world_height();
+    if (width == 0) width = 100;
+    if (height == 0) height = 60;
 
-    s_last_target_px = target_px;
-    s_last_target_py = target_py;
+    if (tile_x >= width) tile_x = width - 1;
+    if (tile_y >= height) tile_y = height - 1;
 
-    uint32_t active_netid = netid;
-    if (active_netid == 0) {
-        auto lp = utils::PlayerTracker::get_instance().get_local_player();
-        active_netid = lp.netID;
+    // Block pathfinding if the clicked target position is solid or not passable:
+    if (is_tile_solid(tile_x, tile_y)) {
+        send_overlay(server->get_player(), "`4Blocked: Target position is solid / not passable!``");
+        spdlog::info("[ShiftClick] Blocked pathfinding: target ({},{}) is solid / not passable", tile_x, tile_y);
+        return true;
     }
 
-    // 1. Instantly warp local camera and player sprite to destination
-    SetPosCommand::set_position(server->get_player(), static_cast<uint32_t>(-1), target_px, target_py);
-    if (active_netid > 0) {
-        SetPosCommand::set_position(server->get_player(), active_netid, target_px, target_py);
-        utils::PlayerTracker::get_instance().update_player_position(active_netid, target_px, target_py);
+    // Get current position for block distance calculation
+    float cur_px = 0.0f, cur_py = 0.0f;
+    uint32_t active_netid = 0;
+    auto local = utils::PlayerTracker::get_instance().get_local_player();
+    if (local.netID != 0) {
+        active_netid = local.netID;
+        auto ppos = utils::PlayerTracker::get_instance().get_player_position(active_netid);
+        if (ppos.x > 0.0f || ppos.y > 0.0f) {
+            cur_px = ppos.x;
+            cur_py = ppos.y;
+        }
+    }
+    if (cur_px <= 0.0f && s_core) {
+        try {
+            std::string sx = s_core->get_config().get<std::string>("player.position.x");
+            std::string sy = s_core->get_config().get<std::string>("player.position.y");
+            if (!sx.empty() && !sy.empty()) {
+                cur_px = std::stof(sx);
+                cur_py = std::stof(sy);
+            }
+        } catch (...) {}
+    }
+    uint32_t start_tx = static_cast<uint32_t>(cur_px / 32.0f);
+    uint32_t start_ty = static_cast<uint32_t>(cur_py / 32.0f);
+
+    if (start_tx == tile_x && start_ty == tile_y) {
+        return true;
     }
 
-    if (s_core) {
-        s_core->get_config().set<std::string>("player.position.x", std::to_string(target_px));
-        s_core->get_config().set<std::string>("player.position.y", std::to_string(target_py));
-        s_core->get_config().save();
-    }
+    uint64_t my_path_id = ++s_current_path_id;
 
-    // 2. Instantly send state packet to server with ground collision flag
-    bool ground_below = is_tile_standable(tile_x, tile_y + 1);
-
-    MoriStatePacket final_pkt{};
-    final_pkt.type = static_cast<uint8_t>(packet::PACKET_STATE);
-    final_pkt.object_type = 0;
-    final_pkt.jump_count = 0;
-    final_pkt.animation_type = 0;
-    final_pkt.net_id = active_netid;
-    final_pkt.target_net_id = 0;
-    final_pkt.vector_x = target_px;
-    final_pkt.vector_y = target_py + 2.0f;
-    final_pkt.vector_x2 = 0.0f;
-    final_pkt.vector_y2 = 0.0f;
-    final_pkt.int_x = -1;
-    final_pkt.int_y = -1;
-    final_pkt.extended_data_length = 0;
-    final_pkt.flags = ground_below ? (0x1u | packet::PACKET_FLAG_ON_SOLID) : 0x1u;
-
-    ByteStream<std::uint16_t> bs{};
-    bs.write(packet::NET_MESSAGE_GAME_PACKET);
-    bs.write(final_pkt);
-
-    if (client && client->get_player()) {
-        client->get_player()->send_packet(bs.get_data(), 0);
-    }
-
-    // 3. Re-confirm local client position lock
-    SetPosCommand::set_position(server->get_player(), static_cast<uint32_t>(-1), target_px, target_py);
-    if (active_netid > 0) {
-        SetPosCommand::set_position(server->get_player(), active_netid, target_px, target_py);
-    }
-
-    uint32_t blocks = static_cast<uint32_t>(std::abs(static_cast<int>(tile_x) - static_cast<int>(start_tx)) + 
-                                           std::abs(static_cast<int>(tile_y) - static_cast<int>(start_ty)));
-    if (blocks == 0) blocks = 1;
-
-    // 4. Send overlay notification with 0.00 secs instant execution
-    send_overlay(server->get_player(),
-        fmt::format("`2Pathfinding to `6{} `wblocks. `60.00 `wsecs.", blocks));
+    // Run LuckyProxy MoveXY in background worker thread:
+    std::thread([client, server, active_netid, start_tx, start_ty, tile_x, tile_y, width, height, my_path_id]() {
+        execute_lucky_move_xy(client, server, active_netid, start_tx, start_ty, tile_x, tile_y, width, height, my_path_id);
+    }).detach();
 
     return true;
 }
-
 
 void FindPathCommand::execute(client::Client* client, const std::vector<std::string>& args) {
     if (!s_core || !client || !client->get_player()) {
@@ -1116,9 +1325,15 @@ void FindPathCommand::execute(client::Client* client, const std::vector<std::str
     if (arg1 == "delay") {
         if (args.size() >= 3) {
             std::string d_arg = args[2];
+            try {
+                int custom_delay = std::stoi(d_arg);
+                set_cooldown_ms(custom_delay);
+                send_console(server->get_player(), fmt::format("`2Pathfinding delay set to `b{}ms`2.", custom_delay));
+                return;
+            } catch (...) {}
             std::transform(d_arg.begin(), d_arg.end(), d_arg.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (d_arg == "on" || d_arg == "enable" || d_arg == "1") {
-                set_cooldown_ms(SAFETY_DELAY_MS);
+                set_cooldown_ms(200);
                 send_console(server->get_player(), fmt::format("`2Pathfinding safety delay enabled: `b{}ms`2.", s_cooldown_ms));
                 return;
             } else if (d_arg == "off" || d_arg == "disable" || d_arg == "0") {
@@ -1132,10 +1347,23 @@ void FindPathCommand::execute(client::Client* client, const std::vector<std::str
             set_cooldown_ms(0);
             send_console(server->get_player(), "`4Pathfinding safety delay disabled (instant mode).");
         } else {
-            set_cooldown_ms(SAFETY_DELAY_MS);
+            set_cooldown_ms(200);
             send_console(server->get_player(), fmt::format("`2Pathfinding safety delay enabled: `b{}ms`2.", s_cooldown_ms));
         }
         return;
+    }
+
+    if (arg1 == "blocks" || arg1 == "step") {
+        if (args.size() >= 3) {
+            try {
+                int blocks = std::stoi(args[2]);
+                if (blocks > 0 && blocks <= 20) {
+                    set_blocks_per_step(blocks);
+                    send_console(server->get_player(), fmt::format("`2Pathfinding blocks per teleport set to `b{}`2.", blocks));
+                    return;
+                }
+            } catch (...) {}
+        }
     }
 
     uint32_t target_x = 0, target_y = 0;
@@ -1153,6 +1381,95 @@ void FindPathCommand::execute(client::Client* client, const std::vector<std::str
         send_overlay(server->get_player(),
             fmt::format("`2Pathfind:`w {} steps to (`9{},{} `w) `o(fast)", used_steps, target_x, target_y));
     }
+}
+
+PfCommand::PfCommand() : CommandBase(
+    {"pf"},
+    {},
+    "Toggle pathfinder mode on/off without opening dialog",
+    0
+) {}
+
+std::unique_ptr<CommandBase> PfCommand::clone() const {
+    return std::make_unique<PfCommand>(*this);
+}
+
+void PfCommand::execute(client::Client* client, const std::vector<std::string>& args) {
+    if (args.size() >= 2) {
+        std::string arg1 = args[1];
+        std::transform(arg1.begin(), arg1.end(), arg1.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (arg1 == "on" || arg1 == "enable" || arg1 == "1") {
+            if (!FindPathCommand::is_click_mode_enabled()) {
+                FindPathCommand::toggle_click_mode();
+            } else {
+                auto* server = FindPathCommand::get_core() ? FindPathCommand::get_core()->get_server() : nullptr;
+                if (server && server->get_player()) {
+                    send_console(server->get_player(), "`2PathFinder is already enabled.");
+                }
+            }
+            return;
+        }
+        if (arg1 == "off" || arg1 == "disable" || arg1 == "0") {
+            if (FindPathCommand::is_click_mode_enabled()) {
+                FindPathCommand::toggle_click_mode();
+            } else {
+                auto* server = FindPathCommand::get_core() ? FindPathCommand::get_core()->get_server() : nullptr;
+                if (server && server->get_player()) {
+                    send_console(server->get_player(), "`4PathFinder is already disabled.");
+                }
+            }
+            return;
+        }
+    }
+    FindPathCommand::toggle_click_mode();
+}
+
+PathFindDialogCommand::PathFindDialogCommand() : CommandBase(
+    {"pathfind", "pathfinding"},
+    {},
+    "Open LuckyProxy-style pathfinder options dialog",
+    0
+) {}
+
+std::unique_ptr<CommandBase> PathFindDialogCommand::clone() const {
+    return std::make_unique<PathFindDialogCommand>(*this);
+}
+
+void PathFindDialogCommand::execute(client::Client* client, const std::vector<std::string>& args) {
+    auto* server = FindPathCommand::get_core() ? FindPathCommand::get_core()->get_server() : nullptr;
+    if (!server || !server->get_player()) return;
+
+    if (args.size() < 2) {
+        FindPathCommand::show_settings_dialog(server->get_player());
+        return;
+    }
+
+    std::string arg1 = args[1];
+    std::transform(arg1.begin(), arg1.end(), arg1.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if (arg1 == "enable" || arg1 == "on" || arg1 == "1") {
+        if (!FindPathCommand::is_click_mode_enabled()) {
+            FindPathCommand::toggle_click_mode();
+        } else {
+            send_console(server->get_player(), "`2PathFinder is already enabled.");
+        }
+        return;
+    }
+    if (arg1 == "disable" || arg1 == "off" || arg1 == "0") {
+        if (FindPathCommand::is_click_mode_enabled()) {
+            FindPathCommand::toggle_click_mode();
+        } else {
+            send_console(server->get_player(), "`4PathFinder is already disabled.");
+        }
+        return;
+    }
+    if (arg1 == "toggle") {
+        FindPathCommand::toggle_click_mode();
+        return;
+    }
+
+    FindPathCommand find_path_cmd;
+    find_path_cmd.execute(client, args);
 }
 
 
@@ -1399,6 +1716,7 @@ void SmCommand::execute(client::Client* client, const std::vector<std::string>& 
 
         server->get_player()->send_packet(bs.get_data(), 0);
         utils::VisualItemsManager::get_instance().send_character_state(server->get_player(), local_player.netID);
+        FindPathCommand::send_pathfinder_state(server->get_player(), local_player.netID);
         
         std::string msg = fmt::format("`0[ `bVinProxy `0] `9SuperMod: `b{} `9(applied immediately!)\n`4Note: Server validates mod permissions", 
                                        s_sm_enabled ? "ON" : "OFF");
@@ -2135,6 +2453,7 @@ void MstateCommand::execute(client::Client* client, const std::vector<std::strin
     auto local_player = tracker.get_local_player();
     if (local_player.netID != 0) {
         utils::VisualItemsManager::get_instance().send_character_state(server->get_player(), local_player.netID);
+        FindPathCommand::send_pathfinder_state(server->get_player(), local_player.netID);
     }
 
     std::string msg = fmt::format("`0[ `bVinProxy `0] `9Mod State (Long Punch): `b{}\n`6Applied immediately!\n`4Warning: May be detected by server!", 
@@ -2562,72 +2881,6 @@ void OverlayCommand::execute(client::Client* client, const std::vector<std::stri
     std::string msg = fmt::format("`0[ `bVinProxy `0] `9Text overlay: `b{}", text);
     send_console(server->get_player(), msg);
     spdlog::info("Sent OnTextOverlay: {}", text);
-}
-
-
-core::Core* ZoomCommand::s_core = nullptr;
-
-ZoomCommand::ZoomCommand() : CommandBase(
-    {"zoom"},
-    {},
-    "Control camera zoom with OnZoomCamera",
-    1
-) {}
-
-void ZoomCommand::set_core(core::Core* core) {
-    s_core = core;
-}
-
-std::unique_ptr<CommandBase> ZoomCommand::clone() const {
-    return std::make_unique<ZoomCommand>(*this);
-}
-
-void ZoomCommand::execute(client::Client* client, const std::vector<std::string>& args) {
-    if (!s_core || !client || !client->get_player()) {
-        spdlog::error("ZoomCommand: No core or player!");
-        return;
-    }
-
-    auto* server = s_core->get_server();
-    if (!server || !server->get_player()) {
-        spdlog::error("ZoomCommand: No server player!");
-        return;
-    }
-
-    if (args.size() < 2) {
-        send_console(server->get_player(), "`4Usage: /zoom <level>");
-        return;
-    }
-
-    float zoom = 1.0f;
-    try {
-        zoom = std::stof(args[1]);
-    } catch (...) {
-        send_console(server->get_player(), "`4Invalid zoom value!");
-        return;
-    }
-
-    packet::Variant var{};
-    var.add("OnZoomCamera");
-    var.add(zoom);
-
-    std::vector<std::byte> ext_data = var.serialize();
-    packet::GameUpdatePacket pkt{};
-    pkt.type = packet::PACKET_CALL_FUNCTION;
-    pkt.net_id = -1;
-    pkt.flags.extended = 1;
-    pkt.data_size = static_cast<uint32_t>(ext_data.size());
-
-    ByteStream<std::uint16_t> bs{};
-    bs.write(packet::NET_MESSAGE_GAME_PACKET);
-    bs.write(pkt);
-    bs.write_data(ext_data.data(), ext_data.size());
-
-    server->get_player()->send_packet(bs.get_data(), 0);
-    
-    std::string msg = fmt::format("`0[ `bVinProxy `0] `9Camera zoom: `b{}", zoom);
-    send_console(server->get_player(), msg);
-    spdlog::info("Sent OnZoomCamera: {}", zoom);
 }
 
 

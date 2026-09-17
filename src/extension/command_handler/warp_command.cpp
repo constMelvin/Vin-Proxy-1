@@ -36,21 +36,56 @@ void WarpCommand::execute(client::Client* client, const std::vector<std::string>
     }
 
     if (args.size() < 2) {
-        
         packet::message::Log error_msg{};
-        error_msg.msg = "`4Usage: /warp <world_name>";
+        error_msg.msg = "`4Usage: /warp <world>|<door> or /warp <world> <door>";
         if (client->get_player()) {
             packet::PacketHelper::send(error_msg, *client->get_player());
         }
         return;
     }
 
-    const std::string& world_name = args[1];
-    send_warp_packet(client, world_name);
-    
+    std::string world;
+    std::string door;
+
+    std::string raw = args[1];
+    if (args.size() >= 3) {
+        raw += " " + args[2];
+    }
+
+    size_t pipe_pos = raw.find('|');
+    if (pipe_pos != std::string::npos) {
+        world = raw.substr(0, pipe_pos);
+        door = raw.substr(pipe_pos + 1);
+    } else {
+        size_t space_pos = raw.find_first_of(" \t");
+        if (space_pos != std::string::npos) {
+            world = raw.substr(0, space_pos);
+            door = raw.substr(space_pos + 1);
+        } else {
+            world = raw;
+        }
+    }
+
+    // Trim whitespace
+    auto trim = [](std::string& s) {
+        while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.erase(s.begin());
+        while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.pop_back();
+    };
+    trim(world);
+    trim(door);
+
+    for (char& c : world) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    for (char& c : door) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+
+    std::string target = world;
+    if (!door.empty()) {
+        target += "|" + door;
+    }
+
+    send_warp_packet(client, target);
     
     packet::message::Log success_msg{};
-    success_msg.msg = fmt::format("`2Warping to world: `5{}", world_name);
+    success_msg.msg = fmt::format("`2Warping to `1{}", target);
     if (client->get_player()) {
         packet::PacketHelper::send(success_msg, *client->get_player());
     }

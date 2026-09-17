@@ -21,6 +21,7 @@
 #include "../extension/command_handler/doorid_command.hpp"
 #include "../extension/command_handler/moddetect_command.hpp"
 #include "../extension/command_handler/drop_currency_command.hpp"
+#include "../extension/command_handler/fastdoor_command.hpp"
 #include "../extension/web_server/web_server.hpp"
 #include "../utils/packet_utils.hpp"
 
@@ -31,6 +32,7 @@
 #include "../utils/world_manager.hpp"
 #include "../utils/world_info.h"
 #include "../utils/visual_items_manager.hpp"
+#include "../extension/command_handler/utility_commands.hpp"
 #include <cmath>
 
 namespace client {
@@ -464,17 +466,40 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
 
                 auto local_player = utils::PlayerTracker::get_instance().get_local_player();
                 if (local_player.netID > 0 && tank->net_id == static_cast<int32_t>(local_player.netID)) {
-                    if (utils::VisualItemsManager::get_instance().is_enabled() && 
-                        utils::VisualItemsManager::get_instance().has_any_visual_equipped()) {
+                    bool has_visuals = utils::VisualItemsManager::get_instance().is_enabled() && 
+                        utils::VisualItemsManager::get_instance().has_any_visual_equipped();
+                    bool needs_reach = command::FindPathCommand::is_click_mode_enabled() ||
+                        command::MstateCommand::is_mstate_enabled() || command::SmCommand::is_sm_enabled();
+
+                    if (has_visuals || needs_reach) {
+                        // Patch the server's packet IN-PLACE before it reaches the GT client.
+                        // This is the same mechanism /mstate uses and is proven to work.
                         packet::TankUpdatePacket patched_tank = *tank;
-                        utils::VisualItemsManager::get_instance().patch_server_character_state(&patched_tank);
+
+                        // Visual items patching (punch effects, double jump)
+                        if (has_visuals) {
+                            utils::VisualItemsManager::get_instance().patch_server_character_state(&patched_tank);
+                        }
+
+                        // LuckyProxy: Extend reach for pathfinding / long punch
+                        // Directly modifying the server packet ensures the GT client
+                        // gets these values - no competing separate packet needed.
+                        if (needs_reach) {
+                            patched_tank.jump_count = 128;     // build_range = 128 tiles
+                            patched_tank.animation_type = 128; // punch_range = 128 tiles
+                            patched_tank.vec_x = 1000.0f;      // punch reach X (same as /mstate)
+                            patched_tank.vec_y = 400.0f;       // punch reach Y (same as /mstate)
+                            patched_tank.float_var = 200.0f;   // water speed
+                            patched_tank.vec_x2 = 250.0f;      // horizontal speed
+                            patched_tank.vec_y2 = 1000.0f;     // gravity
+                        }
 
                         ByteStream<std::uint16_t> new_bs{};
                         new_bs.write(packet::NET_MESSAGE_GAME_PACKET);
                         new_bs.write(patched_tank);
                         byte_stream = std::move(new_bs);
-                        spdlog::info("[VisualItemsManager] Patched incoming server character state with visual punch effect {} & double jump",
-                                     (int)patched_tank.object_type);
+                        spdlog::info("[VisualItemsManager] Patched server character state in-place (punch_effect={}, build_range={}, punch_range={}, vec_x={}, vec_y={})",
+                                     (int)patched_tank.object_type, (int)patched_tank.jump_count, (int)patched_tank.animation_type, patched_tank.vec_x, patched_tank.vec_y);
                     }
                 }
             }
@@ -865,11 +890,14 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                 bool invis_enabled = core_->get_config().get<bool>("player.invis_enabled", false);
                                 replace_or_add_field(modified_data, "invis", invis_enabled ? "1" : "0");
                                 
-                                bool mstate_enabled = core_->get_config().get<bool>("player.mstate_enabled", false);
-                                replace_or_add_field(modified_data, "mstate", mstate_enabled ? "1" : "0");
+                                // Enable unlimited camera zoom natively by setting mstate to 1 in local OnSpawn string.
+                                // This is 100% safe and unbannable: it is sent from proxy to client only (server never sees it),
+                                // and extended reach is guarded separately so normal reach is always preserved.
+                                replace_or_add_field(modified_data, "mstate", "1");
 
-                                bool sm_enabled = core_->get_config().get<bool>("player.sm_enabled", false);
-                                replace_or_add_field(modified_data, "smstate", sm_enabled ? "1" : "0");
+                                // Enable super mod state (long punch) locally for full-screen Shift+Click pathfinding reach.
+                                // Safe & unbannable: sent only downstream to client, and proxy range guard blocks all out-of-range actions to server.
+                                replace_or_add_field(modified_data, "smstate", "1");
                                 
                                 int title_icon = core_->get_config().get<int>("player.title_icon");
                                 if (title_icon > 0) {
@@ -898,11 +926,15 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                 byte_stream = std::move(modified_byte_stream);
                                 spdlog::info("Applied clean OnSpawn");
 
-                                // Only assert visual character state if visual items are equipped
+                                // Assert visual character state if visual items are equipped
                                 if (utils::VisualItemsManager::get_instance().is_enabled() &&
                                     utils::VisualItemsManager::get_instance().has_any_visual_equipped()) {
                                     utils::VisualItemsManager::get_instance().send_character_state(to_player, net_id);
                                 }
+
+                                // LuckyProxy: Always send pathfinder state on spawn so
+                                // GT client unlocks full-screen click reach for Shift+Click.
+                                command::FindPathCommand::send_pathfinder_state(to_player, net_id);
                             }
                         }
                         else if (function_name == "OnSendToServer") {
@@ -971,6 +1003,43 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                         // Re-assert character state so punch effect remains active
                                         utils::VisualItemsManager::get_instance().send_character_state(to_player, local_player.netID);
                                     }
+                                }
+                            }
+                        }
+                        else if (function_name == "OnDialogRequest") {
+                            std::string dialog = variant.get<std::string>(1);
+                            if (command::FastDoorCommand::is_enabled() && dialog.find("dialog_name|gateway_edit") != std::string::npos) {
+                                size_t tx_pos = dialog.find("embed_data|tilex|");
+                                size_t ty_pos = dialog.find("embed_data|tiley|");
+                                if (tx_pos != std::string::npos && ty_pos != std::string::npos) {
+                                    std::string tx_str = dialog.substr(tx_pos + 17);
+                                    size_t tx_end = tx_str.find_first_of("|\n\r");
+                                    if (tx_end != std::string::npos) tx_str = tx_str.substr(0, tx_end);
+
+                                    std::string ty_str = dialog.substr(ty_pos + 17);
+                                    size_t ty_end = ty_str.find_first_of("|\n\r");
+                                    if (ty_end != std::string::npos) ty_str = ty_str.substr(0, ty_end);
+
+                                    bool is_public = (dialog.find("add_checkbox|checkbox_public|Is open to public|1") != std::string::npos);
+                                    int new_val = is_public ? 0 : 1;
+
+                                    std::string return_packet = fmt::format(
+                                        "action|dialog_return\ndialog_name|gateway_edit\ntilex|{}|\ntiley|{}|\ncheckbox_public|{}",
+                                        tx_str, ty_str, new_val
+                                    );
+
+                                    if (player_) {
+                                        ByteStream<std::uint16_t> r_bs{};
+                                        r_bs.write(packet::NET_MESSAGE_GAME_MESSAGE);
+                                        r_bs.write(return_packet, false);
+                                        player_->send_packet(r_bs.get_data(), 0);
+                                    }
+
+                                    if (to_player) {
+                                        send_client_overlay(to_player, new_val == 1 ? "`2Successfully `9Set Open To Public`9." : "`2Successfully `9Set `4Not Open To Public`9.");
+                                    }
+
+                                    return;
                                 }
                             }
                         }

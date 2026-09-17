@@ -177,6 +177,7 @@ endif()
 # Compiler options
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE 
+        /MP
         /bigobj
         /EHsc
         /W4

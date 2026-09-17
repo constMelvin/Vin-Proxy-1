@@ -55,11 +55,12 @@ struct CategoryInfo {
 
 static const std::vector<CategoryInfo>& get_categories() {
     static const std::vector<CategoryInfo> s_cats = {
+        {"casino",   "Casino & CSN Host",             "`6", 758},
         {"move",     "Position & Movement",           "`2", 242},
         {"econ",     "Economy, Drops & Vending",       "`e", 2978},
         {"cosmetic", "Clothes & Visual Customization", "`b", 1784},
         {"world",    "World, Scanner & Navigation",    "`1", 6878},
-        {"mod",      "Admin, Moderation & Cheats",     "`4", 758},
+        {"mod",      "Admin, Moderation & Cheats",     "`4", 32},
         {"auto",     "Automation & Utilities",         "`3", 3410}
     };
     return s_cats;
@@ -67,24 +68,38 @@ static const std::vector<CategoryInfo>& get_categories() {
 
 static const std::vector<CommandDoc>& get_all_commands() {
     static const std::vector<CommandDoc> s_commands = {
+        // --- 0. Casino & CSN Host ---
+        {"casino", "/tp", "", "Teleport to bets & collect with 1.5 reach, calc prize with tax", "`6", "tp casino bet collect prize tax"},
+        {"casino", "/pos1, /pos2", "", "Set drop pos 1 & 2 via player coords (VFX + select)", "`6", "pos1 pos2 drop position csn bet"},
+        {"casino", "/spos1, /spos2", "", "Set drop pos 1 & 2 by punching a tile", "`6", "spos1 spos2 punch position tile csn"},
+        {"casino", "/cpos1, /cpos2", "", "Check & highlight saved drop positions 1 & 2", "`6", "cpos1 cpos2 check highlight pos"},
+        {"casino", "/w1, /win1", "", "Warp to player 1 zone, drop prize (BGL/DL/WL), return", "`6", "w1 win1 win player1 drop prize"},
+        {"casino", "/w2, /win2", "", "Warp to player 2 zone, drop prize (BGL/DL/WL), return", "`6", "w2 win2 win player2 drop prize"},
+        {"casino", "/host", "", "Open CSN casino hoster calculator & dialog", "`6", "host csn casino calculator roulette hoster"},
+        {"casino", "/qq", "[on/off]", "Toggle Show QQ Number in roulette spin", "`6", "qq showqq number host csn"},
+        {"casino", "/reme", "[on/off]", "Toggle Show REME Spin in roulette spin", "`6", "reme showreme spin host csn"},
+        {"casino", "/ignorecsn", "", "Block CSN casino broadcast messages", "`6", "ignorecsn csn block ignore broadcast"},
+        {"casino", "/ignorecsnchat", "", "Block CSN casino chat bubbles", "`6", "ignorecsnchat csn chat ignore mute"},
+
         // --- 1. Position & Movement ---
         {"move", "/pos1 - /pos4", "", "Save checkpoint 1-4 with ring particle VFX (#88)", "`2", "pos1 pos2 pos3 pos4 pos checkpoint ring"},
-        {"move", "/posback", "", "Save current position as back checkpoint", "`2", "posback checkpoint"},
+        {"move", "/posback, /setback", "", "Save current position as back checkpoint", "`2", "posback setback checkpoint"},
         {"move", "/tp1 - /tp4", "", "Instant teleport to saved position 1-4", "`2", "tp1 tp2 tp3 tp4 teleport"},
-        {"move", "/back", "", "Teleport back to saved pos (or previous world)", "`2", "back return teleport"},
+        {"move", "/back, /BACK", "", "Teleport back to saved pos (or previous world)", "`2", "back BACK return teleport"},
+        {"move", "/pf", "", "Toggle pathfinder mode on/off without dialog", "`2", "pf toggle shift click"},
+        {"move", "/pathfind", "", "Open LuckyProxy-style Pathfinder Options dialog", "`2", "pathfind pathfinding dialog options"},
         {"move", "/path", "[x] [y]", "Walk pathfinding to coordinates (or Shift+Click)", "`2", "path findpath walk astar"},
-        {"move", "/findpath", "", "Open pathfinding settings dialog (click mode & delay)", "`2", "findpath settings click path"},
         {"move", "/stop", "", "Cancel current pathfinding walk immediately", "`2", "stop cancel walk"},
         {"move", "/playertp", "[name/netid]", "Teleport directly to player in world", "`2", "playertp ptp tp player"},
         {"move", "/setpos", "[x] [y]", "Send raw OnSetPos position update packet", "`2", "setpos rawpos teleport"},
 
         // --- 2. Economy, Drops & Vending ---
-        {"econ", "/fd", "", "Toggle fast drop mode (auto-confirms drop dialogs)", "`e", "fd fastdrop"},
+        {"econ", "/fd, /fastdrop", "", "Toggle fast drop mode (auto-confirms drop dialogs)", "`e", "fd fastdrop"},
         {"econ", "/dropall", "", "Drop all items from inventory", "`e", "dropall alldrop"},
         {"econ", "/dropall", "[amt]", "Drop specified amount of each item from inventory", "`e", "dropall alldrop amt amount quantity"},
         {"econ", "/dpos", "", "Set drop position where your character stands (like pos1-4)", "`e", "dpos drop position pos"},
         {"econ", "/dropat", "[amt]", "Teleport to /dpos position and drop items", "`e", "dropat dpos drop amt"},
-        {"econ", "/daw", "", "Drop all World Locks, Diamond Locks, and BGLs from inventory", "`e", "daw dawl dropalllocks dropallwl"},
+        {"econ", "/daw, /dawl", "", "Drop all World Locks, Diamond Locks, and BGLs from inventory", "`e", "daw dawl dropalllocks dropallwl"},
         {"econ", "/dw", "[amt]", "Drop World Locks (e.g. /dw 50)", "`e", "dw dropwl wl"},
         {"econ", "/dd", "[amt]", "Drop Diamond Locks (e.g. /dd 150 = 1dl 50wl)", "`e", "dd dropdl dl"},
         {"econ", "/dbgl", "[amt]", "Drop Blue Gem Locks (e.g. /dbgl 5)", "`e", "dbgl dropbgl bgl"},
@@ -136,8 +151,12 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"cosmetic", "/ghost", "", "Toggle ghost character visual mode", "`b", "ghost transparent invis char"},
 
         // --- 4. World, Scanner & Navigation ---
-        {"world", "/warp", "[world]", "Warp directly to specified world", "`1", "warp world goto join"},
-        {"world", "/back", "", "Warp back to previous visited world", "`1", "back previous world warp"},
+        {"world", "/warp", "[world]|[door]", "Warp directly to world and door ID", "`1", "warp world goto join door"},
+        {"world", "/back, /BACK", "", "Warp back to previously visited world", "`1", "back BACK previous world warp"},
+        {"world", "/relog", "", "Reconnect and relog into current world (quit_to_exit)", "`1", "relog reconnect restart world"},
+        {"world", "/save, /saveworld", "", "Warp to designated safe storage world", "`1", "save saveworld safe world warp"},
+        {"world", "/setsave", "[world]", "Set and save designated safe storage world to config", "`1", "setsave save safe world config"},
+        {"world", "/fastdoor", "", "Toggle fast open/close entrance doors (auto-public)", "`1", "fastdoor door public open close gateway"},
         {"world", "/exit", "", "Exit world to main menu", "`1", "exit leave unjoin"},
         {"world", "/growscan, /gs", "", "Scan floating items, blocks & trees in world", "`1", "growscan gs scan floating items world"},
         {"world", "/gsbeta", "", "Beta world scanner with item totals", "`1", "gsbeta scan beta totals"},
@@ -145,7 +164,7 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"world", "/lockefind", "", "Scan world for Locke the Traveling Salesman", "`1", "lockefind locke salesman merchant"},
         {"world", "/dat", "", "Inspect tile extra data (seeds, signs, locks)", "`1", "dat tile trees seeds sign data inspect"},
         {"world", "/chest", "", "Inspect items placed inside chests in world", "`1", "chest box container inspect"},
-        {"world", "/inventory", "", "View complete inventory items list", "`1", "inventory inv items list"},
+        {"world", "/inventory, /inv", "", "View complete inventory items list", "`1", "inventory inv items list"},
         {"world", "/players", "", "List all players currently in world with NetIDs", "`1", "players list netid player who"},
         {"world", "/door", "[door_id]", "Enter specific door by ID", "`1", "door enter id portal"},
         {"world", "/doorid", "", "Scan and display all door IDs in world", "`1", "doorid scan door ids"},
@@ -175,11 +194,6 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"mod", "/warn", "[netid]", "Send warning popup dialog to player", "`4", "warn warning popup alert player"},
         {"mod", "/mentor", "[netid]", "Set player mentor state badge", "`4", "mentor role badge helper"},
         {"mod", "/fakemaint", "[msg]", "Display fake system maintenance popup", "`4", "fakemaint maintenance restart fake"},
-        {"mod", "/host", "", "Open CSN casino hoster calculator & dialog", "`4", "host csn casino calculator roulette hoster"},
-        {"mod", "/qq", "[on/off]", "Toggle Show QQ Number in roulette spin", "`4", "qq showqq number host csn"},
-        {"mod", "/reme", "[on/off]", "Toggle Show REME Spin in roulette spin", "`4", "reme showreme spin host csn"},
-        {"mod", "/ignorecsn", "", "Block CSN casino broadcast messages", "`4", "ignorecsn csn block ignore broadcast"},
-        {"mod", "/ignorecsnchat", "", "Block CSN casino chat bubbles", "`4", "ignorecsnchat csn chat ignore mute"},
 
         // --- 6. Automation & Utility ---
         {"auto", "/spam", "", "Open Auto Spam settings dialog", "`3", "spam autospam chat dialog"},
@@ -193,12 +207,11 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"auto", "/broadcast", "[msg]", "Send visual broadcast announcement banner", "`3", "broadcast announcement banner fake"},
         {"auto", "/bubble", "[text]", "Spawn custom chat bubble over head", "`3", "bubble talk chat text speech"},
         {"auto", "/overlay", "[text]", "Display screen center text announcement", "`3", "overlay screen text display"},
-        {"auto", "/zoom", "[val]", "Adjust camera zoom level", "`3", "zoom camera view distance"},
         {"auto", "/gems", "[amt]", "Set visual gem count (server-validated)", "`3", "gems bux fake visual count"},
         {"auto", "/bux", "[amt]", "Set visual Growtokens count (server-validated)", "`3", "bux tokens visual count"},
         {"auto", "/debuganim", "", "Animation packet debugger and copier", "`3", "debuganim animation debug packet copy"},
         {"auto", "/rawvar", "[args]", "Send custom raw VarList packet", "`3", "rawvar varlist packet debug"},
-        {"auto", "/proxy, /help", "", "Open this comprehensive commands guide", "`3", "proxy commands help info guide menu"}
+        {"auto", "/proxy, /help", "[filter]", "Open this comprehensive commands guide", "`3", "proxy commands help info guide menu"}
     };
     return s_commands;
 }
@@ -228,10 +241,11 @@ void ProxyCommand::execute(client::Client* client, const std::vector<std::string
         return;
     }
 
-    ProxyCommand::show_commands_gui(client->get_player(), g_core_proxy);
+    std::string filter = (args.size() > 1) ? args[1] : "";
+    ProxyCommand::show_commands_gui(client->get_player(), g_core_proxy, filter);
 }
 
-void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, const std::string& /*filter*/, const std::string& /*category*/) {
+void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, const std::string& filter, const std::string& category) {
     if (!player) {
         spdlog::error("ProxyCommand: player is null!");
         return;
@@ -247,27 +261,58 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, c
         const auto& all_cmds = get_all_commands();
         const auto& all_cats = get_categories();
 
+        std::string filter_lower = to_lower(trim(filter));
+
         std::ostringstream dialog;
         dialog << "set_default_color|`o\n";
         dialog << "add_label_with_icon|big|`wVinProxy Commands and Features``|left|5956|\n";
         dialog << "add_spacer|small|\n";
-        dialog << "add_smalltext|`9Complete Command Directory • Total: `w" << all_cmds.size() << " Commands``|\n";
+
+        size_t match_count = 0;
+        for (const auto& c : all_cmds) {
+            if (!filter_lower.empty()) {
+                std::string search_target = to_lower(c.cmd + " " + c.args + " " + c.desc + " " + c.aliases + " " + c.category);
+                if (search_target.find(filter_lower) == std::string::npos) continue;
+            }
+            if (category != "all" && !category.empty() && c.category != category) continue;
+            match_count++;
+        }
+
+        if (!filter_lower.empty()) {
+            dialog << "add_smalltext|`9Filtered Results for '`w" << filter << "`9' • Found: `w" << match_count << " Commands``|\n";
+        } else {
+            dialog << "add_smalltext|`9Complete Command Directory • Total: `w" << all_cmds.size() << " Commands``|\n";
+        }
+        dialog << "add_spacer|small|\n";
+
+        dialog << "add_text_input|proxy_search|Search:|" << filter << "|30|\n";
+        dialog << "add_button|search_btn|Search|noflags|0|0|\n";
         dialog << "add_spacer|small|\n";
 
         // Display all categories and their commands compactly
         for (size_t i = 0; i < all_cats.size(); ++i) {
             const auto& cat = all_cats[i];
-            if (i > 0) {
-                dialog << "add_spacer|small|\n";
-            }
-            dialog << "add_label_with_icon|small|" << cat.color << cat.title << "``|left|" << cat.icon << "|\n";
-            dialog << "add_spacer|small|\n";
+            if (category != "all" && !category.empty() && cat.id != category) continue;
 
+            std::vector<const CommandDoc*> cat_cmds;
             for (const auto& c : all_cmds) {
                 if (c.category != cat.id) continue;
+                if (!filter_lower.empty()) {
+                    std::string search_target = to_lower(c.cmd + " " + c.args + " " + c.desc + " " + c.aliases + " " + c.category);
+                    if (search_target.find(filter_lower) == std::string::npos) continue;
+                }
+                cat_cmds.push_back(&c);
+            }
 
-                std::string arg_str = c.args.empty() ? "" : (" `9" + c.args);
-                std::string line = fmt::format("{}{}{} `o- {}``", c.color, c.cmd, arg_str, c.desc);
+            if (cat_cmds.empty()) continue;
+
+            dialog << "add_spacer|small|\n";
+            dialog << "add_label_with_icon|small|" << cat.color << cat.title << " (" << cat_cmds.size() << ")``|left|" << cat.icon << "|\n";
+            dialog << "add_spacer|small|\n";
+
+            for (const auto* c : cat_cmds) {
+                std::string arg_str = c->args.empty() ? "" : (" `9" + c->args);
+                std::string line = fmt::format("{}{}{} `o- {}``", c->color, c->cmd, arg_str, c->desc);
                 dialog << "add_smalltext|" << line << "|\n";
             }
         }
@@ -306,8 +351,11 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, c
     }
 }
 
-void ProxyCommand::handle_dialog_return(player::Player* /*player*/, const std::string& /*button_clicked*/, const std::string& /*search_query*/) {
-    // No action needed since dialog shows all commands directly
+void ProxyCommand::handle_dialog_return(player::Player* player, const std::string& button_clicked, const std::string& search_query) {
+    if (!player || !g_core_proxy) return;
+    if (button_clicked == "search_btn" || (!search_query.empty() && button_clicked != "close")) {
+        ProxyCommand::show_commands_gui(player, g_core_proxy, search_query);
+    }
 }
 
 InfoCommand::InfoCommand() : CommandBase(

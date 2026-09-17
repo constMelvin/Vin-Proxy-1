@@ -58,6 +58,9 @@
 #include "locketest001_command.hpp"
 #include "proxy_command.hpp"
 #include "position_command.hpp"
+#include "relog_command.hpp"
+#include "save_world_command.hpp"
+#include "fastdoor_command.hpp"
 #include "devicecheck_command.hpp"
 #include "dropat_command.hpp"
 #include "utility_commands.hpp"
@@ -167,7 +170,6 @@ public:
         command::BuxCommand::set_core(core_);
         command::BubbleCommand::set_core(core_);
         command::OverlayCommand::set_core(core_);
-        command::ZoomCommand::set_core(core_);
         command::RainbowCommand::set_core(core_);
         command::InfinityCommand::set_core(core_);
         command::DragonCommand::set_core(core_);
@@ -202,6 +204,14 @@ public:
         command::RawVariantCommand::set_core(core_);
         command::PlayersInfoCommand::set_core(core_);
         command::DebugAnimCommand::set_core(core_);
+
+        command::RelogCommand::set_core(core_);
+        command::SaveWorldCommand::set_core(core_);
+        command::FastDoorCommand::set_core(core_);
+        command::SPosCommand::set_core(core_);
+        command::CPosCommand::set_core(core_);
+        command::CasinoTPCommand::set_core(core_);
+        command::WinCommand::set_core(core_);
         
         
         register_command(std::make_unique<command::WarpCommand>());
@@ -261,6 +271,8 @@ public:
         register_command(std::make_unique<command::DropAtCommand>());
         register_command(std::make_unique<command::DposCommand>());
         register_command(std::make_unique<command::FindPathCommand>());
+        register_command(std::make_unique<command::PfCommand>());
+        register_command(std::make_unique<command::PathFindDialogCommand>());
         register_command(std::make_unique<command::PlayerTPCommand>());
         register_command(std::make_unique<command::FlagCommand>());
         register_command(std::make_unique<command::InvisCommand>());
@@ -278,7 +290,6 @@ public:
         register_command(std::make_unique<command::BuxCommand>());
         register_command(std::make_unique<command::BubbleCommand>());
         register_command(std::make_unique<command::OverlayCommand>());
-        register_command(std::make_unique<command::ZoomCommand>());
         register_command(std::make_unique<command::RainbowCommand>());
         register_command(std::make_unique<command::InfinityCommand>());
         register_command(std::make_unique<command::DragonCommand>());
@@ -336,6 +347,14 @@ public:
         register_command(std::make_unique<command::RawVariantCommand>());
         register_command(std::make_unique<command::PlayersInfoCommand>());
         register_command(std::make_unique<command::DebugAnimCommand>());
+
+        register_command(std::make_unique<command::RelogCommand>());
+        register_command(std::make_unique<command::SaveWorldCommand>());
+        register_command(std::make_unique<command::FastDoorCommand>());
+        register_command(std::make_unique<command::SPosCommand>());
+        register_command(std::make_unique<command::CPosCommand>());
+        register_command(std::make_unique<command::CasinoTPCommand>());
+        register_command(std::make_unique<command::WinCommand>());
 
         spdlog::trace("Registered {} commands", commands_.size());
 
@@ -731,7 +750,7 @@ private:
                 event.canceled = true;
                 return;
             }
-            else if (dialog_name == "pathfind_gui") {
+            else if (dialog_name == "pathfind_gui" || dialog_name == "pf_options") {
                 command::FindPathCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), button_clicked, event.get_message().get_raw());
                 event.canceled = true;
                 return;
@@ -931,72 +950,62 @@ private:
             tank = reinterpret_cast<const packet::TankUpdatePacket*>(&game_packet);
         }
 
+        bool is_cheat_key = (game_packet.type == packet::PACKET_TILE_CHANGE_REQUEST && tank && tank->int_data == 3704);
+        bool is_punch_state = (game_packet.type == packet::PACKET_STATE && tank &&
+                               (tank->flags == 2592 || tank->flags == 2608 ||
+                                (tank->flags & 0x200) != 0 ||
+                                (tank->flags & (packet::PACKET_FLAG_ON_PUNCHED | 0x800)) != 0 ||
+                                (tank->int_x >= 0 && tank->int_y >= 0)));
+
         bool is_click_packet = (game_packet.type == packet::PACKET_TILE_CHANGE_REQUEST ||
                                 game_packet.type == packet::PACKET_TILE_ACTIVATE_REQUEST ||
                                 game_packet.type == packet::PACKET_ITEM_ACTIVATE_REQUEST ||
                                 game_packet.type == packet::PACKET_TILE_APPLY_DAMAGE ||
-                                game_packet.type == packet::PACKET_STATE);
+                                game_packet.type == packet::PACKET_TILE_PUNCH ||
+                                is_punch_state);
 
-        // Determine if Fist (punch) is selected:
-        // Item 18 is Fist, item 0 is default/empty hand.
-        // Any other ID (locks, blocks, seeds, wrench, etc.) is NOT fist.
-        bool is_fist_selected = false;
-        if (game_packet.type == packet::PACKET_TILE_CHANGE_REQUEST) {
-            uint16_t item_id = tank ? static_cast<uint16_t>(tank->int_data) : 0;
-            is_fist_selected = (item_id == 18 || item_id == 0);
-        } else if (game_packet.type == packet::PACKET_TILE_APPLY_DAMAGE || game_packet.type == packet::PACKET_STATE) {
-            is_fist_selected = true;
-        }
-
-        if (shift_held && is_click_packet) {
-            // Shift + Click teleport ONLY activates when FIST is selected!
-            // If Fist is NOT selected (e.g. lock or block selected), DO NOT teleport.
-            if (is_fist_selected && tank) {
+        if ((shift_held && is_click_packet) || is_cheat_key) {
+            // LuckyProxy Shift + Click pathfinding / teleport everywhere:
+            // Works with ANY item selected (fist, wrench, blocks, seeds, tools, etc.)
+            // The packet is immediately cancelled so no block is ever placed or punch sent to the server.
+            if (tank) {
                 int32_t tx = -1;
                 int32_t ty = -1;
 
-                if (game_packet.type == packet::PACKET_STATE) {
-                    if (tank->int_x >= 0 && tank->int_y >= 0) {
-                        tx = tank->int_x;
-                        ty = tank->int_y;
+                if (tank->int_x >= 0 && tank->int_y >= 0) {
+                    tx = tank->int_x;
+                    ty = tank->int_y;
+                } else if (game_packet.type != packet::PACKET_STATE) {
+                    if (tank->vec_x > 0.0f || tank->vec_y > 0.0f) {
+                        tx = static_cast<int32_t>(tank->vec_x / 32.0f);
+                        ty = static_cast<int32_t>(tank->vec_y / 32.0f);
                     }
-                } else {
-                    tx = (tank->int_x >= 0) ? tank->int_x : static_cast<int32_t>(tank->vec_x / 32.0f);
-                    ty = (tank->int_y >= 0) ? tank->int_y : static_cast<int32_t>(tank->vec_y / 32.0f);
                 }
 
                 if (tx >= 0 && ty >= 0) {
-                    spdlog::info("[SHIFT-CLICK] type={}, tx={}, ty={}",
+                    spdlog::info("[SHIFT-CLICK / LUCKY PROXY] type={}, tx={}, ty={}",
                         static_cast<int>(game_packet.type), tx, ty);
                     client::Client* client = core_->get_client();
                     if (client) {
                         command::FindPathCommand::handle_shift_click(client, static_cast<uint32_t>(tx), static_cast<uint32_t>(ty));
                     }
-                    // Always cancel the click packet so no punch leaks to server!
-                    const_cast<core::EventPacket&>(event).canceled = true;
-                    return;
-                }
-            } else {
-                // If Fist is NOT selected while Shift is held, DO NOT teleport!
-                // Cancel the packet immediately so holding shift never places locks or blocks accidentally.
-                if (game_packet.type != packet::PACKET_STATE) {
-                    const_cast<core::EventPacket&>(event).canceled = true;
-                    auto* srv = core_->get_server();
-                    if (srv && srv->get_player()) {
-                        command::send_overlay(srv->get_player(), "`4Select Fist to Shift+Click teleport!");
-                    }
-                    return;
                 }
             }
+            // Always cancel the click packet so no action leaks to server while shifting!
+            const_cast<core::EventPacket&>(event).canceled = true;
+            return;
         }
 
         // STRICT ORIGINAL RANGE ENFORCEMENT ON ALL ITEMS (PUT & BREAK):
-        // On ALL items, never put (place locks, blocks, seeds, tools) or break (punch)
-        // using long range. Putting and breaking is strictly confined to original character range (|diff| <= 2).
+        // On ALL items and actions, never put (place locks, blocks, seeds, tools), activate,
+        // or break (punch with items or empty fist) using long range.
+        // All non-shift actions are strictly confined to original character range (|diff| <= 2).
         bool is_tile_action = (game_packet.type == packet::PACKET_TILE_CHANGE_REQUEST ||
                                game_packet.type == packet::PACKET_TILE_APPLY_DAMAGE ||
                                game_packet.type == packet::PACKET_TILE_ACTIVATE_REQUEST ||
-                               game_packet.type == packet::PACKET_ITEM_ACTIVATE_REQUEST);
+                               game_packet.type == packet::PACKET_ITEM_ACTIVATE_REQUEST ||
+                               game_packet.type == packet::PACKET_TILE_PUNCH ||
+                               is_punch_state);
         if (is_tile_action && tank && tank->int_x >= 0 && tank->int_y >= 0) {
             float px = -1.0f, py = -1.0f;
             auto local = utils::PlayerTracker::get_instance().get_local_player();
@@ -1030,8 +1039,14 @@ private:
 
                 // Original character range is strictly at most 2 tiles in X and Y (5x5 interaction box)
                 if (diff_x > 2 || diff_y > 2) {
-                    spdlog::warn("[PROTECTION] Blocked out-of-range action: item={} target=({},{}) player=({},{}) diff=({},{})",
-                                 tank->int_data, tank->int_x, tank->int_y, p_tile_x, p_tile_y, diff_x, diff_y);
+                    spdlog::warn("[PROTECTION] Blocked out-of-range action: type={} item={} target=({},{}) player=({},{}) diff=({},{})",
+                                 static_cast<int>(game_packet.type), tank->int_data, tank->int_x, tank->int_y, p_tile_x, p_tile_y, diff_x, diff_y);
+                    const_cast<core::EventPacket&>(event).canceled = true;
+                    return;
+                }
+            } else {
+                if (tank->int_x > 2 || tank->int_y > 2) {
+                    spdlog::warn("[PROTECTION] Blocked unverified out-of-range action: target=({},{})", tank->int_x, tank->int_y);
                     const_cast<core::EventPacket&>(event).canceled = true;
                     return;
                 }
@@ -1091,7 +1106,7 @@ private:
                 else if (dialog_name == "growscan_menu" || dialog_name == "growscan_results") {
                     handle_growscan_response(const_cast<player::Player*>(&event.get_player()), button_clicked, dialog_name);
                 }
-                else if (dialog_name == "pathfind_gui") {
+                else if (dialog_name == "pathfind_gui" || dialog_name == "pf_options") {
                     command::FindPathCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), button_clicked, dialog_data);
                 }
                 else if (dialog_name == "clothes_dialog") {

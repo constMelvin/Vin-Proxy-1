@@ -320,7 +320,7 @@ private:
                 
                 if (!mac_address.empty()) {
                     std::string mac_msg = fmt::format(
-                        "MAC: `2{}",
+                        "`9MAC: `2{}",
                         mac_address
                     );
                     utils::PacketUtils::send_chat_message(
@@ -334,7 +334,7 @@ private:
                 
                 if (!user_id.empty()) {
                     std::string user_msg = fmt::format(
-                        "UserID: `2{}",
+                        "`9UserID: `2{}",
                         user_id
                     );
                     utils::PacketUtils::send_chat_message(
@@ -346,7 +346,7 @@ private:
                 }
 
                 // Send Player Authentication console message
-                std::string auth_msg = "Player Authentication: `2Successful.";
+                std::string auth_msg = "`9Player Authentication: `2Successful.";
                 utils::PacketUtils::send_chat_message(
                     const_cast<player::Player*>(&event.get_player()),
                     auth_msg,

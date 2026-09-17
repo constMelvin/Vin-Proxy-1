@@ -104,14 +104,14 @@ void SpamCommand::send_spam_dialog(player::Player* player) {
     std::ostringstream dialog;
     dialog << "set_default_color|`o\n";
     dialog << "add_label_with_icon|big|Auto Spam Page|left|2480|\n";
-    dialog << fmt::format("add_checkbox|auto_pull|`2Auto Disable When Pulled|{}|\n", s_auto_disable_on_pull ? 1 : 0);
-    dialog << "add_textbox|`oAutomatically Disables Spam When you Pull someone.|left|\n";
-    dialog << fmt::format("add_checkbox|c_text|`2Enable `ccolored text|{}|\n", s_colored_text ? 1 : 0);
-    dialog << "add_textbox|`oIf Colored Text is enabled, leave the text without ` colors.|left|\n";
-    dialog << fmt::format("add_text_input|spam_msg|`2Spam Text: |{}|50|\n", s_spam_text);
-    dialog << fmt::format("add_text_input|delay_msg|`2Delay (ms): |{}|5|\n", s_spam_delay_ms);
-    dialog << "add_textbox|`o1000ms = 1 Second (Default: 4000ms)|left|\n";
-    dialog << "add_textbox|`oWrite // to Enable/Disable Spam.|left|\n";
+    dialog << fmt::format("add_checkbox|auto_pull|`2Auto Disable When Pulled|{}\n", s_auto_disable_on_pull ? 1 : 0);
+    dialog << "add_custom_textbox|`oAutomatically Disables Spam When you Pull someone.|size:small|\n";
+    dialog << fmt::format("add_checkbox|c_text|`oEnable `2colored text|{}\n", s_colored_text ? 1 : 0);
+    dialog << "add_custom_textbox|`oIf Colored Text is enabled, leave the text without ` colors.|size:small|\n";
+    dialog << fmt::format("add_text_input|spam_msg|`cSpam Text: |{}|50|\n", s_spam_text);
+    dialog << fmt::format("add_text_input|delay_msg|`cDelay (ms): |{}|5|\n", s_spam_delay_ms);
+    dialog << "add_custom_textbox|`91000ms = 1 Second|size:small|\n";
+    dialog << "add_custom_textbox|`9Write `2//`9 to Enable/Disable Spam.|size:small|\n";
     dialog << "end_dialog|spam_dialog|Cancel|Apply|\n";
 
     std::string dialog_str = dialog.str();

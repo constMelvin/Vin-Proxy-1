@@ -61,15 +61,28 @@ public:
     static void handle_dialog_response(player::Player* player, const std::string& button_clicked, const std::string& dialog_data);
     static void apply_dialog_settings(const std::string& dialog_data);
 
+    static core::Core* get_core() { return s_core; }
+    static int get_blocks_per_step() { return s_blocks_per_step; }
+    static void set_blocks_per_step(int blocks) { s_blocks_per_step = blocks; }
+
     static bool should_suppress_onsetpos(float server_x, float server_y);
     static bool is_sync_in_progress();
     static void update_last_target_pos(float px, float py);
     static int run_path(client::Client* client, uint32_t target_x, uint32_t target_y, bool show_console, int delay_ms = -1, uint64_t path_id = 0);
+    static void execute_lucky_move_xy(client::Client* client, server::Server* server, uint32_t active_netid,
+                                      uint32_t start_tx, uint32_t start_ty, uint32_t target_tx, uint32_t target_ty,
+                                      uint32_t width, uint32_t height, uint64_t my_path_id);
+    
+    // LuckyProxy send_state: Sends PACKET_SET_CHARACTER_STATE to local client with
+    // punch_range=128 and build_range=128, enabling full-screen click reach.
+    // Completely independent of visual items system. Safe: only sent downstream to client.
+    static void send_pathfinder_state(player::Player* client_player, uint32_t net_id);
     
 private:
     static core::Core* s_core;
     static bool s_click_mode_enabled;
     static int s_cooldown_ms;
+    static int s_blocks_per_step;
     static std::chrono::steady_clock::time_point s_last_tp_time;
     static std::atomic<uint64_t> s_current_path_id;
     static std::atomic<bool> s_sync_in_progress;
@@ -77,6 +90,20 @@ private:
     static uint32_t s_last_click_tile_y;
     static float s_last_target_px;
     static float s_last_target_py;
+};
+
+class PfCommand : public CommandBase {
+public:
+    PfCommand();
+    void execute(client::Client* client, const std::vector<std::string>& args) override;
+    std::unique_ptr<CommandBase> clone() const override;
+};
+
+class PathFindDialogCommand : public CommandBase {
+public:
+    PathFindDialogCommand();
+    void execute(client::Client* client, const std::vector<std::string>& args) override;
+    std::unique_ptr<CommandBase> clone() const override;
 };
 
 class PlayerTPCommand : public CommandBase {
@@ -299,18 +326,6 @@ private:
 class OverlayCommand : public CommandBase {
 public:
     OverlayCommand();
-    void execute(client::Client* client, const std::vector<std::string>& args) override;
-    std::unique_ptr<CommandBase> clone() const override;
-    
-    static void set_core(core::Core* core);
-    
-private:
-    static core::Core* s_core;
-};
-
-class ZoomCommand : public CommandBase {
-public:
-    ZoomCommand();
     void execute(client::Client* client, const std::vector<std::string>& args) override;
     std::unique_ptr<CommandBase> clone() const override;
     
