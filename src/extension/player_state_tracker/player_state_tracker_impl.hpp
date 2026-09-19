@@ -125,14 +125,6 @@ private:
         }
     }
 
-    bool is_punch_action(const packet::TankUpdatePacket* tank) const {
-        if (tank->type == packet::PACKET_TILE_CHANGE_REQUEST) return true;
-        if ((tank->flags & packet::PACKET_FLAG_ON_PUNCHED) != 0) return true;
-        if ((tank->flags & packet::PACKET_FLAG_ON_TILE_ACTION) != 0) return true;
-        if (tank->animation_type == 3) return true;
-        return false;
-    }
-
     void handle_client_actions(const core::EventPacket& event, const packet::TankUpdatePacket* tank) {
         bool needs_modification = false;
         packet::TankUpdatePacket modified_tank = *tank;
@@ -162,44 +154,19 @@ private:
             send_modified_packet(event, modified_tank);
         }
 
-        // Visual weapon animation on client punch
+        // Visual weapon sound effects on client punch (actual punch only, NOT when placing blocks/seeds)
         auto hand_it = command::g_clothing_slots.find(5);
         if (hand_it != command::g_clothing_slots.end() && hand_it->second > 0) {
-            if (is_punch_action(tank)) {
+            bool is_actual_punch = (tank->type == packet::PACKET_TILE_CHANGE_REQUEST && tank->int_data == 18) ||
+                                   (tank->type == packet::PACKET_TILE_PUNCH) ||
+                                   (tank->type == packet::PACKET_STATE && (tank->flags & packet::PACKET_FLAG_ON_PUNCHED) != 0);
+            if (is_actual_punch) {
                 uint32_t hand_id = static_cast<uint32_t>(hand_it->second);
                 uint32_t my_netid = get_local_netid();
-                uint8_t anim = utils::WeaponAnimationManager::get_instance().get_anim_type(hand_id);
-
                 packet::TankUpdatePacket punch_tank = *tank;
-                if (punch_tank.vec_x <= 0.0f || punch_tank.vec_y <= 0.0f) {
-                    punch_tank.vec_x = local_x_;
-                    punch_tank.vec_y = local_y_;
-                }
+                punch_tank.vec_x = local_x_;
+                punch_tank.vec_y = local_y_;
                 utils::WeaponAnimationManager::get_instance().play_weapon_effects(core_, hand_id, my_netid, &punch_tank);
-
-                // Play predicted weapon animation locally for client avatar
-                if (core_ && core_->get_server() && core_->get_server()->get_player()) {
-                    packet::TankUpdatePacket anim_tank = *tank;
-                    anim_tank.type = packet::PACKET_STATE;
-                    anim_tank.net_id = static_cast<int32_t>(my_netid);
-                    anim_tank.animation_type = anim;
-                    anim_tank.int_data = hand_id;
-                    anim_tank.flags |= packet::PACKET_FLAG_ON_PUNCHED;
-                    if (anim_tank.vec_x <= 0.0f || anim_tank.vec_y <= 0.0f) {
-                        anim_tank.vec_x = local_x_;
-                        anim_tank.vec_y = local_y_;
-                    }
-                    if (anim == 4 && anim_tank.vec_x2 == 0.0f && anim_tank.vec_y2 == 0.0f) {
-                        bool left = (anim_tank.flags & packet::PACKET_FLAG_ROTATE_LEFT) != 0;
-                        anim_tank.vec_x2 = left ? -200.0f : 200.0f;
-                        anim_tank.vec_y2 = 0.0f;
-                    }
-
-                    ByteStream<std::uint16_t> bs{};
-                    bs.write(packet::NET_MESSAGE_GAME_PACKET);
-                    bs.write(anim_tank);
-                    core_->get_server()->get_player()->send_packet(bs.get_data(), 0);
-                }
             }
         }
     }
@@ -211,23 +178,7 @@ private:
         uint32_t my_netid = get_local_netid();
         bool is_our_player = (my_netid > 0 && tank->net_id == static_cast<int32_t>(my_netid)) || (tank->net_id == local_netid_) || (my_netid == 0);
         
-        // Custom weapon swing logic on server echo back to client
-        auto hand_it = command::g_clothing_slots.find(5);
-        if (hand_it != command::g_clothing_slots.end() && hand_it->second > 0 && is_our_player) {
-            uint32_t hand_id = static_cast<uint32_t>(hand_it->second);
-            if (is_punch_action(tank)) {
-                uint8_t anim = utils::WeaponAnimationManager::get_instance().get_anim_type(hand_id);
-                modified_tank.int_data = hand_id;
-                modified_tank.animation_type = anim;
-                modified_tank.flags |= packet::PACKET_FLAG_ON_PUNCHED;
-                if (anim == 4 && modified_tank.vec_x2 == 0.0f && modified_tank.vec_y2 == 0.0f) {
-                    bool left = (modified_tank.flags & packet::PACKET_FLAG_ROTATE_LEFT) != 0;
-                    modified_tank.vec_x2 = left ? -200.0f : 200.0f;
-                    modified_tank.vec_y2 = 0.0f;
-                }
-                needs_modification = true;
-            }
-        } else if (is_our_player && is_punch_action(tank)) {
+        if (is_our_player && (tank->flags & packet::PACKET_FLAG_ON_PUNCHED) != 0) {
             auto clothing = utils::PlayerTracker::get_instance().get_clothing();
             uint32_t real_hand = static_cast<uint32_t>(clothing.hand);
             if (real_hand > 0) {
