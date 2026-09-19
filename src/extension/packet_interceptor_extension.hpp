@@ -3,6 +3,7 @@
 #include "../utils/world_manager.hpp"
 #include "../utils/inventory_manager.hpp"
 #include "../utils/byte_stream.hpp"
+#include "../utils/gems_manager.hpp"
 #include "../packet/tank_packet.hpp"
 #include "../packet/packet_types.hpp"
 #include "command_handler/autocollect_command.hpp"  
@@ -64,14 +65,23 @@ private:
         bool shift_held = false;
 #endif
 
-        if (tank && game_packet.type == packet::PACKET_TILE_CHANGE_REQUEST && !shift_held) {
-            uint16_t item_id = static_cast<uint16_t>(tank->int_data);
-            if (item_id != 18 && item_id != 0) {
-                handle_tile_change(tank);
+        if (tank && !shift_held) {
+            if (game_packet.type == packet::PACKET_TILE_CHANGE_REQUEST) {
+                uint16_t item_id = static_cast<uint16_t>(tank->int_data);
+                if (item_id != 18 && item_id != 0) {
+                    handle_tile_change(tank);
+                }
             }
         }
 
         if (event.from != core::EventFrom::FromServer) return;
+
+        // ─── Periodic gem updates (driven by server packets) ─────────
+        {
+            auto& gems_mgr = utils::GemsManager::get_instance();
+            gems_mgr.update_collected_gems_display(core_);
+            gems_mgr.update_instant_gem_drop(core_);
+        }
         
         
         if (game_packet.type == packet::PACKET_SEND_INVENTORY_STATE) {
@@ -89,40 +99,12 @@ private:
         
         if (tank) {
             switch (game_packet.type) {
-                case packet::PACKET_ITEM_CHANGE_OBJECT:
-                    spdlog::info(">>> Handling: net_id={}, int_data={}, float_var={}", 
-                                tank->net_id, tank->int_data, tank->float_var);
-                    handle_item_change_object(tank);
-                    break;
                 case packet::PACKET_MODIFY_ITEM_INVENTORY:
                     handle_modify_inventory(tank);
                     break;
                 default:
                     break;
             }
-        }
-    }
-
-    void handle_item_change_object(const packet::TankUpdatePacket* tank) {
-        auto& world_mgr = utils::WorldManager::get_instance();
-        
-        spdlog::info("[ITEM-CHANGE] net_id={}, target={}, flags=0x{:X}, float_var={}, int_data={}, x2={}, y2={}, pos=({:.1f},{:.1f})", 
-                    tank->net_id, tank->target_net_id, tank->flags, tank->float_var, tank->int_data,
-                    tank->vec_x2, tank->vec_y2, tank->vec_x, tank->vec_y);
-        
-        if (tank->is_item_drop()) {
-            command::AutoCollectCommand::notify_item_drop(tank->vec_x, tank->vec_y);
-        }
-        else if (tank->is_item_collect()) {
-            uint32_t uid = tank->int_data;
-            world_mgr.remove_dropped_item_by_uid(uid);
-            spdlog::info("✓ Live object collected: UID {}", uid);
-        }
-        else if (tank->is_item_update()) {
-            spdlog::info("✓ Live object count updated");
-        }
-        else {
-            spdlog::warn("[ITEM-CHANGE] Unknown net_id pattern - not drop/collect/update");
         }
     }
 
@@ -155,3 +137,4 @@ private:
 };
 
 } 
+

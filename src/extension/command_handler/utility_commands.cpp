@@ -12,12 +12,14 @@
 #include "../../utils/player_tracker.hpp"
 #include "../../utils/packet_utils.hpp"
 #include "../../utils/text_parse.hpp"
+#include "../../utils/gems_manager.hpp"
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
 #include <thread>
 #include <chrono>
 #include <cmath>
 #include <algorithm>
+#include <set>
 #ifdef _WIN32
 #include <Windows.h>
 #endif
@@ -2604,8 +2606,8 @@ core::Core* GemsCommand::s_core = nullptr;
 GemsCommand::GemsCommand() : CommandBase(
     {"gems"},
     {},
-    "Attempt to set gems with OnGemsCountChange",
-    1
+    "Open Gem Settings dialog",
+    0
 ) {}
 
 void GemsCommand::set_core(core::Core* core) {
@@ -2614,6 +2616,99 @@ void GemsCommand::set_core(core::Core* core) {
 
 std::unique_ptr<CommandBase> GemsCommand::clone() const {
     return std::make_unique<GemsCommand>(*this);
+}
+
+void GemsCommand::show_gems_dialog(player::Player* player) {
+    if (!player) return;
+
+    auto& gm = utils::GemsManager::get_instance();
+
+    std::string is_collected = gm.collected_gems ? "1" : "0";
+    std::string is_show_others = gm.show_gems_to_others ? "1" : "0";
+    std::string is_instant = gm.instant_gems ? "1" : "0";
+    std::string is_punch_tile = gm.punch_tile_gems ? "1" : "0";
+
+    std::string dialog =
+        "add_label_with_icon|big|`9Gems Options|left|14542|\n"
+        "add_spacer|small|\n"
+        "add_checkbox|collected_gems|" + gm.prim_color + "Enable " + gm.seco_color + "Show Collected Gems Count|" + is_collected + "|\n"
+        "add_custom_margin|x:0;y:-32|\n"
+        "add_custom_textbox|" + gm.seco_color + "Will Show Gems Count That You Collect|size:tiny;color:200,200,200,200|\n"
+        "add_custom_margin|x:0;y:10|\n"
+        "add_checkbox|show_gems_to_others|" + gm.prim_color + "Enable " + gm.seco_color + "Show Collected Gems To Others|" + is_show_others + "|\n"
+        "add_custom_margin|x:0;y:-32|\n"
+        "add_custom_textbox|" + gm.seco_color + "Will Show Collected Gems Count To Other Players (Good For BJ)|size:tiny;color:200,200,200,200|\n"
+        "add_custom_margin|x:0;y:10|\n"
+        "add_checkbox|instant_gems|" + gm.prim_color + "Enable " + gm.seco_color + "Show Instant Gems Drop|" + is_instant + "|\n"
+        "add_custom_margin|x:0;y:-32|\n"
+        "add_custom_textbox|" + gm.seco_color + "Will Show Gems Count Instantly When Gems Are Dropped - Write (/cgems) To Show Again|size:tiny;color:200,200,200,200|\n"
+        "add_custom_margin|x:0;y:10|\n"
+        "add_checkbox|punch_tile_gems|" + gm.prim_color + "Enable " + gm.seco_color + "Show Gems Count When You Punch Tile|" + is_punch_tile + "|\n"
+        "add_custom_margin|x:0;y:-32|\n"
+        "add_custom_textbox|" + gm.seco_color + "Will Show Gems Count When You Punch Tile|size:tiny;color:200,200,200,200|\n"
+        "add_custom_margin|x:0;y:10|\n"
+        "add_spacer|small|\n"
+        "end_dialog|gems_option_dialog|Cancel|Okay|\n";
+
+    packet::Variant var{};
+    var.add("OnDialogRequest");
+    var.add(dialog);
+
+    std::vector<std::byte> ext_data = var.serialize();
+    packet::GameUpdatePacket pkt{};
+    pkt.type = packet::PACKET_CALL_FUNCTION;
+    pkt.net_id = -1;
+    pkt.flags.extended = 1;
+    pkt.data_size = static_cast<uint32_t>(ext_data.size());
+
+    ByteStream<std::uint16_t> bs{};
+    bs.write(packet::NET_MESSAGE_GAME_PACKET);
+    bs.write(pkt);
+    bs.write_data(ext_data.data(), ext_data.size());
+    player->send_packet(bs.get_data(), 0);
+
+    spdlog::info("[GemsCommand] Gems options dialog sent to player");
+}
+
+void GemsCommand::handle_dialog_response(player::Player* player, const std::string& button_clicked, const std::string& dialog_data) {
+    if (!player) return;
+
+    if (button_clicked == "Cancel") return;
+
+    auto& gm = utils::GemsManager::get_instance();
+
+    auto updateToggle = [&](const std::string& key, bool& target, const std::string& enabledMsg, const std::string& disabledMsg) {
+        size_t pos = dialog_data.find(key + "|");
+        if (pos == std::string::npos)
+            return;
+        try {
+            std::string valueStr = dialog_data.substr(pos + key.size() + 1);
+            bool newValue = std::stoi(valueStr.c_str()) != 0;
+            if (target != newValue) {
+                target = newValue;
+                if (!enabledMsg.empty() && !disabledMsg.empty()) {
+                    send_console(player, target ? enabledMsg : disabledMsg);
+                }
+                spdlog::info("[GemsDialog] {} -> {}", key, target ? "ON" : "OFF");
+            }
+        } catch (const std::exception&) {
+            send_console(player, gm.prim_color + "Critical Error: " + gm.seco_color + "Override detected");
+            spdlog::error("[GemsDialog] Parse error for key={}", key);
+        }
+    };
+
+    updateToggle("collected_gems", gm.collected_gems,
+                 gm.prim_color + "Show Collected Gems Count " + gm.seco_color + "Enabled.",
+                 gm.prim_color + "Show Collected Gems Count " + gm.seco_color + "Disabled.");
+    updateToggle("show_gems_to_others", gm.show_gems_to_others,
+                 gm.prim_color + "Show Collected Gems To Others " + gm.seco_color + "Enabled.",
+                 gm.prim_color + "Show Collected Gems To Others " + gm.seco_color + "Disabled.");
+    updateToggle("instant_gems", gm.instant_gems,
+                 gm.prim_color + "Show Instant Gems Count " + gm.seco_color + "Enabled. (use /cgems to display again)",
+                 gm.prim_color + "Show Instant Gems Count " + gm.seco_color + "Disabled.");
+    updateToggle("punch_tile_gems", gm.punch_tile_gems,
+                 gm.prim_color + "Show Gems Count When Punch Tile " + gm.seco_color + "Enabled.",
+                 gm.prim_color + "Show Gems Count When Punch Tile " + gm.seco_color + "Disabled.");
 }
 
 void GemsCommand::execute(client::Client* client, const std::vector<std::string>& args) {
@@ -2628,48 +2723,65 @@ void GemsCommand::execute(client::Client* client, const std::vector<std::string>
         return;
     }
 
-    if (args.size() < 2) {
-        send_console(server->get_player(), "`4Usage: /gems <amount>");
+    show_gems_dialog(server->get_player());
+}
+
+
+// ─── CGemsCommand ─────────────────────────────────────────────────────
+core::Core* CGemsCommand::s_core = nullptr;
+
+CGemsCommand::CGemsCommand() : CommandBase(
+    {"cgems"},
+    {},
+    "Show gem count on all tiles with gems",
+    0
+) {}
+
+void CGemsCommand::set_core(core::Core* core) {
+    s_core = core;
+}
+
+std::unique_ptr<CommandBase> CGemsCommand::clone() const {
+    return std::make_unique<CGemsCommand>(*this);
+}
+
+void CGemsCommand::execute(client::Client* client, const std::vector<std::string>& args) {
+    if (!s_core || !client || !client->get_player()) {
+        spdlog::error("CGemsCommand: No core or player!");
         return;
     }
 
-    int amount = 0;
-    try {
-        amount = std::stoi(args[1]);
-    } catch (...) {
-        send_console(server->get_player(), "`4Invalid amount!");
+    auto* server = s_core->get_server();
+    if (!server || !server->get_player()) {
+        spdlog::error("CGemsCommand: No server player!");
         return;
     }
 
-    auto& tracker = utils::PlayerTracker::get_instance();
-    auto local_player = tracker.get_local_player();
+    auto& world_mgr = utils::WorldManager::get_instance();
+    auto& gems_mgr = utils::GemsManager::get_instance();
 
-    if (local_player.netID != 0) {
-        
-        packet::Variant var{};
-        var.add("OnGemsCountChange");
-        var.add(amount);
-
-        std::vector<std::byte> ext_data = var.serialize();
-        packet::GameUpdatePacket pkt{};
-        pkt.type = packet::PACKET_CALL_FUNCTION;
-        pkt.net_id = local_player.netID;
-        pkt.flags.extended = 1;
-        pkt.data_size = static_cast<uint32_t>(ext_data.size());
-
-        ByteStream<std::uint16_t> bs{};
-        bs.write(packet::NET_MESSAGE_GAME_PACKET);
-        bs.write(pkt);
-        bs.write_data(ext_data.data(), ext_data.size());
-
-        server->get_player()->send_packet(bs.get_data(), 0);
-        
-        std::string msg = fmt::format("`0[ `bVinProxy `0] `9Sent OnGemsCountChange: `b{}gems `4(server-validated!)", amount);
-        send_console(server->get_player(), msg);
-        spdlog::info("Sent OnGemsCountChange {} to netID: {}", amount, local_player.netID);
-    } else {
-        send_console(server->get_player(), "`4Not spawned yet!");
+    // Collect all unique tile positions that have gems (itemID 112) - matching Lucky Proxy
+    std::set<std::pair<int, int>> gem_tiles;
+    auto all_items = world_mgr.get_all_dropped_items();
+    for (const auto& obj : all_items) {
+        if (obj.ItemId != 112)
+            continue;
+        int tile_x = static_cast<int>((obj.X + 10.0f) / 32.0f);
+        int tile_y = static_cast<int>((obj.Y + 10.0f) / 32.0f);
+        gem_tiles.emplace(tile_x, tile_y);
+        gem_tiles.emplace(static_cast<int>(obj.X / 32.0f), static_cast<int>(obj.Y / 32.0f));
     }
+
+    if (gem_tiles.empty()) {
+        send_console(server->get_player(), "`2[CGEMS]`w: No gems found on the ground.");
+        return;
+    }
+
+    for (const auto& tile : gem_tiles) {
+        gems_mgr.display_gems_in_tile(s_core, tile.first, tile.second);
+    }
+
+    send_console(server->get_player(), "`2[CGEMS]`w: Displayed gem counts on all tiles with gems.");
 }
 
 

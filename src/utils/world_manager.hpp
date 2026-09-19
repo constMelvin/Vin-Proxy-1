@@ -71,6 +71,7 @@ public:
         
         tiles_.clear();
         items_.clear();
+        live_objects_.clear();
         has_world_ = false;
         server_reported_no_access_ = false;
         
@@ -621,10 +622,68 @@ public:
 
     void add_live_object(const world::DroppedItemInfo& item) {
         std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& existing : live_objects_) {
+            if (existing.Uid == item.Uid) {
+                existing = item;
+                return;
+            }
+        }
+        for (auto& existing : items_) {
+            if (existing.Uid == item.Uid) {
+                existing = item;
+                return;
+            }
+        }
         live_objects_.push_back(item);
         if (item.Uid > last_dropped_item_uid_) last_dropped_item_uid_ = item.Uid;
         spdlog::info("WorldManager: Added live object {} x{} at ({:.1f}, {:.1f}) [total: {}]", 
                     item.ItemId, item.Amount, item.X, item.Y, live_objects_.size());
+    }
+
+    std::vector<world::DroppedItemInfo> get_all_dropped_items() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::unordered_map<uint32_t, world::DroppedItemInfo> unique_map;
+        for (const auto& it : items_) {
+            unique_map[it.Uid] = it;
+        }
+        for (const auto& it : live_objects_) {
+            unique_map[it.Uid] = it;
+        }
+        std::vector<world::DroppedItemInfo> result;
+        result.reserve(unique_map.size());
+        for (const auto& [uid, it] : unique_map) {
+            result.push_back(it);
+        }
+        return result;
+    }
+
+    void update_dropped_item(uint32_t uid, uint16_t item_id, float x, float y, uint32_t amount) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& item : live_objects_) {
+            if (item.Uid == uid) {
+                item.ItemId = item_id;
+                item.X = x;
+                item.Y = y;
+                item.Amount = amount;
+                return;
+            }
+        }
+        for (auto& item : items_) {
+            if (item.Uid == uid) {
+                item.ItemId = item_id;
+                item.X = x;
+                item.Y = y;
+                item.Amount = amount;
+                return;
+            }
+        }
+        world::DroppedItemInfo item{};
+        item.Uid = uid;
+        item.ItemId = item_id;
+        item.X = x;
+        item.Y = y;
+        item.Amount = amount;
+        live_objects_.push_back(item);
     }
     
     void remove_dropped_item_by_uid(uint32_t uid) {
@@ -650,6 +709,18 @@ public:
     
     void add_dropped_item(const world::DroppedItemInfo& item) {
         std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& existing : items_) {
+            if (existing.Uid == item.Uid) {
+                existing = item;
+                return;
+            }
+        }
+        for (auto& existing : live_objects_) {
+            if (existing.Uid == item.Uid) {
+                existing = item;
+                return;
+            }
+        }
         items_.push_back(item);
         if (item.Uid > last_dropped_item_uid_) last_dropped_item_uid_ = item.Uid;
         spdlog::debug("WorldManager: Added dropped item {} (total: {})", item.ItemId, items_.size());
@@ -659,18 +730,18 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         auto pred = [item_id, x, y](const world::DroppedItemInfo& item) {
             return (item_id == 0 || item.ItemId == item_id) && 
-                   std::abs(item.X - x) < 48.0f && 
-                   std::abs(item.Y - y) < 48.0f;
+                   std::abs(item.X - x) <= 12.0f && 
+                   std::abs(item.Y - y) <= 12.0f;
         };
-        auto it1 = std::remove_if(items_.begin(), items_.end(), pred);
+        auto it1 = std::find_if(items_.begin(), items_.end(), pred);
         if (it1 != items_.end()) {
-            items_.erase(it1, items_.end());
+            items_.erase(it1);
             spdlog::debug("WorldManager: Removed dropped item {} near ({:.0f}, {:.0f}) from items_", item_id, x, y);
         }
 
-        auto it2 = std::remove_if(live_objects_.begin(), live_objects_.end(), pred);
+        auto it2 = std::find_if(live_objects_.begin(), live_objects_.end(), pred);
         if (it2 != live_objects_.end()) {
-            live_objects_.erase(it2, live_objects_.end());
+            live_objects_.erase(it2);
             spdlog::debug("WorldManager: Removed dropped item {} near ({:.0f}, {:.0f}) from live_objects_", item_id, x, y);
         }
     }

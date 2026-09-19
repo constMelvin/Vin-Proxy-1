@@ -294,6 +294,20 @@ public:
     std::unique_ptr<CommandBase> clone() const override;
     
     static void set_core(core::Core* core);
+    static void show_gems_dialog(player::Player* player);
+    static void handle_dialog_response(player::Player* player, const std::string& button_clicked, const std::string& dialog_data);
+    
+private:
+    static core::Core* s_core;
+};
+
+class CGemsCommand : public CommandBase {
+public:
+    CGemsCommand();
+    void execute(client::Client* client, const std::vector<std::string>& args) override;
+    std::unique_ptr<CommandBase> clone() const override;
+    
+    static void set_core(core::Core* core);
     
 private:
     static core::Core* s_core;

@@ -19,6 +19,7 @@
 #include "../extension/command_handler/doorid_command.hpp"
 #include "../extension/command_handler/position_command.hpp"
 #include "../utils/items_dat_patcher.hpp"
+#include "../utils/gems_manager.hpp"
 
 namespace server {
 namespace {
@@ -380,6 +381,22 @@ void Server::on_receive(ENetPeer* peer, ENetPacket* packet)
                     const auto* tank = reinterpret_cast<const packet::TankUpdatePacket*>(raw_bytes.data() + start_pos);
                     if (tank->int_x >= 0 && tank->int_y >= 0) {
                         command::PositionCommand::handle_punched_tile(tank->int_x, tank->int_y);
+                    }
+                }
+            }
+
+            // Punch tile gems: when client punches a tile, display gems on that tile (matching Lucky Proxy)
+            if (utils::GemsManager::get_instance().punch_tile_gems) {
+                const auto& raw_bytes = byte_stream.get_data();
+                if (raw_bytes.size() >= start_pos + sizeof(packet::TankUpdatePacket)) {
+                    const auto* tank = reinterpret_cast<const packet::TankUpdatePacket*>(raw_bytes.data() + start_pos);
+                    if (tank->int_x >= 0 && tank->int_y >= 0) {
+                        bool is_punch = (game_update_packet.type == packet::PACKET_TILE_PUNCH) ||
+                                        (game_update_packet.type == packet::PACKET_TILE_CHANGE_REQUEST && tank->int_data == 18) ||
+                                        (game_update_packet.type == packet::PACKET_STATE && (tank->flags == 2592 || tank->flags == 2608));
+                        if (is_punch) {
+                            utils::GemsManager::get_instance().display_gems_in_tile(core_, tank->int_x, tank->int_y);
+                        }
                     }
                 }
             }

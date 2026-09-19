@@ -73,6 +73,7 @@
 #include "../../utils/text_parse.hpp"
 #include "../../utils/packet_utils.hpp"
 #include "../../packet/tank_packet.hpp"
+#include "../../utils/gems_manager.hpp"
 #include <unordered_map>
 #include <memory>
 #include <algorithm>
@@ -167,6 +168,7 @@ public:
         command::BetaCommand::set_core(core_);
         command::InitWorldCommand::set_core(core_);
         command::GemsCommand::set_core(core_);
+        command::CGemsCommand::set_core(core_);
         command::BuxCommand::set_core(core_);
         command::BubbleCommand::set_core(core_);
         command::OverlayCommand::set_core(core_);
@@ -287,6 +289,7 @@ public:
         register_command(std::make_unique<command::BetaCommand>());
         register_command(std::make_unique<command::InitWorldCommand>());
         register_command(std::make_unique<command::GemsCommand>());
+        register_command(std::make_unique<command::CGemsCommand>());
         register_command(std::make_unique<command::BuxCommand>());
         register_command(std::make_unique<command::BubbleCommand>());
         register_command(std::make_unique<command::OverlayCommand>());
@@ -752,6 +755,11 @@ private:
             }
             else if (dialog_name == "pathfind_gui" || dialog_name == "pf_options") {
                 command::FindPathCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), button_clicked, event.get_message().get_raw());
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "gems_option_dialog") {
+                command::GemsCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), button_clicked, event.get_message().get_raw());
                 event.canceled = true;
                 return;
             }

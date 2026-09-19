@@ -21,6 +21,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include "../../utils/inventory_manager.hpp"
+#include "../../utils/gems_manager.hpp"
 #include "../command_handler/dat_command.hpp"
 #include "../command_handler/dropall_command.hpp"
 #include "../command_handler/dropat_command.hpp"
@@ -1253,6 +1254,32 @@ private:
                             } catch (...) {
                                 
                             }
+                        }
+                    }
+
+                    // Suppress server's native "Collected X Gem(s)" talk bubble if proxy handles gems
+                    // (prevents duplicate double talk bubbles above player's head)
+                    auto& gm = utils::GemsManager::get_instance();
+                    if (gm.collected_gems || gm.show_gems_to_others) {
+                        static const std::regex gem_collect_rx(
+                            R"(^Collected\s+(\d+)\s+Gems?\.?$)",
+                            std::regex::icase
+                        );
+                        std::string clean_bubble = trim_copy(strip_gt_codes_local(bubble_text));
+                        std::smatch gem_m;
+                        if (std::regex_match(clean_bubble, gem_m, gem_collect_rx)) {
+                            // If client.cpp didn't already process this gem collect within the last 300ms,
+                            // process it here so collecting on ANY tile is 100% guaranteed to show the bubble!
+                            if (!gm.was_recently_collected(300)) {
+                                int srv_gems = 1;
+                                try { srv_gems = std::stoi(gem_m[1].str()); } catch (...) {}
+                                uint32_t b_netid = read_netid_variant(variant, 1);
+                                gm.on_gems_collected(core_, srv_gems, b_netid);
+                            }
+
+                            spdlog::debug("[Gems] Suppressed server native collect bubble '{}'", bubble_text);
+                            const_cast<core::EventPacket&>(event).canceled = true;
+                            return;
                         }
                     }
 

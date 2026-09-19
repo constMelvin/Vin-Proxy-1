@@ -367,7 +367,7 @@ bool World::parse(const uint8_t* data, size_t size) {
                         break;
                         
                     case 23: 
-                        reader.skip(4);
+                        tile.display_item_id = reader.read<uint32_t>();
                         break;
                         
                     case 24: 
@@ -858,7 +858,37 @@ bool World::parse(const uint8_t* data, size_t size) {
                         reader.seek(item_start + item_size);
                     }
                 } else {
-                    spdlog::warn("Smart-Scan failed to find a valid items pattern");
+                    spdlog::warn("Smart-Scan failed to find a valid items pattern, attempting direct fallback");
+                    for (size_t fallback_offset : {12ULL, 0ULL, 4ULL, 8ULL, 16ULL}) {
+                        if (start_pos + fallback_offset + 8 > size) continue;
+                        reader.seek(start_pos + fallback_offset);
+                        uint32_t f_count = reader.read<uint32_t>();
+                        uint32_t f_uid = reader.read<uint32_t>();
+                        if (f_count > 0 && f_count <= 5000 && (start_pos + fallback_offset + 8 + f_count * 16 <= size)) {
+                            uint16_t test_id = reader.read<uint16_t>();
+                            if (test_id > 0 && test_id < 25000) {
+                                spdlog::info("Fallback dropped items parser matched: count={}, uid={}, offset={}", f_count, f_uid, fallback_offset);
+                                reader.seek(start_pos + fallback_offset + 8);
+                                dropped_items_count = f_count;
+                                last_dropped_item_uid = f_uid;
+                                dropped_items.reserve(f_count);
+                                for (uint32_t i = 0; i < f_count; ++i) {
+                                    if (reader.position() + 16 > size) break;
+                                    DroppedItem item;
+                                    item.id = reader.read<uint16_t>();
+                                    item.x = reader.read<float>();
+                                    item.y = reader.read<float>();
+                                    item.count = reader.read<uint8_t>();
+                                    reader.skip(1);
+                                    item.uid = reader.read<uint32_t>();
+                                    if (item.id != 0) {
+                                        dropped_items.push_back(item);
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
                 }
                 
                 if (dropped_items.size() > 0) {

@@ -81,6 +81,8 @@ struct Tile {
 
     
     DonationData donation_data;
+
+    uint32_t display_item_id = 0;
     
     
     bool has_extra() const { return (flags & 0x01) != 0; }

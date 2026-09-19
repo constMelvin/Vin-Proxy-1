@@ -32,6 +32,8 @@
 #include "../utils/world_manager.hpp"
 #include "../utils/world_info.h"
 #include "../utils/visual_items_manager.hpp"
+#include "../utils/gems_manager.hpp"
+#include "../extension/command_handler/autocollect_command.hpp"
 #include "../extension/command_handler/utility_commands.hpp"
 #include <cmath>
 
@@ -456,6 +458,9 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
             }
         }
 
+        // Periodic update for instant gem drops
+        utils::GemsManager::get_instance().update_instant_gem_drop(core_);
+
         if (game_update_packet.type == packet::PACKET_SET_CHARACTER_STATE) {
             const auto& raw = byte_stream.get_data();
             if (raw.size() >= 4 + sizeof(packet::TankUpdatePacket)) {
@@ -550,8 +555,8 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                     uint32_t new_uid = wm.allocate_next_dropped_uid();
                     world::DroppedItemInfo di{};
                     di.ItemId = static_cast<uint16_t>(pkt_value);
-                    di.X      = std::ceil(vec_x);
-                    di.Y      = std::ceil(vec_y);
+                    di.X      = vec_x;
+                    di.Y      = vec_y;
                     
                     uint32_t count = static_cast<uint32_t>(b[3]);
                     if (float_var > 0.0f && float_var < 100000.0f) {
@@ -565,6 +570,20 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                     wm.add_dropped_item(di);
                     spdlog::info("[ITEM_DROP] id={} uid={} x={:.0f} y={:.0f} count={}",
                                  di.ItemId, di.Uid, di.X, di.Y, di.Amount);
+
+                    command::AutoCollectCommand::notify_item_drop(vec_x, vec_y);
+
+                    if (di.ItemId == 112) {
+                        auto& gm = utils::GemsManager::get_instance();
+                        if (gm.instant_gems) {
+                            int tx = std::max(0, static_cast<int>(di.X / 32.0f));
+                            int ty = std::max(0, static_cast<int>(di.Y / 32.0f));
+                            gm.instant_drop_x = tx;
+                            gm.instant_drop_y = ty;
+                            gm.gems_drop = true;
+                            gm.queue_instant_gem_drop(core_, tx, ty);
+                        }
+                    }
 
                     if (di.ItemId == 242 || di.ItemId == 1796 || di.ItemId == 7188) {
                         auto local_player = utils::PlayerTracker::get_instance().get_local_player();
@@ -622,6 +641,16 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                         }
                     }
 
+                } else if (pkt_net_id == 0xFFFFFFFD || static_cast<int32_t>(pkt_net_id) == -3 || static_cast<int32_t>(pkt_net_id) == -4) {
+                    uint32_t target_uid = static_cast<uint32_t>(target_net_id);
+                    uint16_t item_id = static_cast<uint16_t>(pkt_value);
+                    uint32_t count = static_cast<uint32_t>(b[3]);
+                    if (float_var > 0.0f && float_var < 100000.0f) {
+                        uint32_t f_count = static_cast<uint32_t>(float_var);
+                        if (f_count > 0) count = f_count;
+                    }
+                    if (count == 0) count = 1;
+                    wm.update_dropped_item(target_uid, item_id, vec_x, vec_y, count);
                 } else if (pkt_net_id > 0 && pkt_net_id != 0xFFFFFFFC) {
                     wm.record_server_uid(pkt_value);
                     auto local_player = utils::PlayerTracker::get_instance().get_local_player();
@@ -679,6 +708,9 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                     }
 
                     if (is_local) {
+                        if (coll_id == 112 && coll_amount > 0) {
+                            utils::GemsManager::get_instance().on_gems_collected(core_, static_cast<int>(coll_amount), pkt_net_id);
+                        }
                         if (utils::InventoryManager::get_instance().record_collected_uid(pkt_value)) {
                             if (coll_id > 0 && coll_amount > 0) {
                                 auto& inv_mgr = utils::InventoryManager::get_instance();
