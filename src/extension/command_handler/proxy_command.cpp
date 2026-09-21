@@ -12,6 +12,9 @@
 #include <algorithm>
 #include <vector>
 #include <string>
+#include <thread>
+#include <chrono>
+#include <atomic>
 
 namespace command {
 
@@ -230,6 +233,9 @@ static std::string trim(const std::string& s) {
     return s.substr(first, (last - first + 1));
 }
 
+static int s_current_proxy_tab = 0;
+static std::atomic<bool> s_switching_tab = false;
+
 void ProxyCommand::execute(client::Client* client, const std::vector<std::string>& args) {
     if (!client || !client->get_player()) {
         spdlog::error("ProxyCommand: client or player is null!");
@@ -242,58 +248,94 @@ void ProxyCommand::execute(client::Client* client, const std::vector<std::string
         return;
     }
 
-    std::string filter = (args.size() > 1) ? args[1] : "";
-    ProxyCommand::show_commands_gui(client->get_player(), g_core_proxy, filter);
+    int tab = s_current_proxy_tab;
+    std::string filter = "";
+    if (args.size() > 1) {
+        if (args[1] == "1" || args[1] == "main") tab = 0;
+        else if (args[1] == "2" || args[1] == "casino" || args[1] == "csn") tab = 1;
+        else if (args[1] == "3" || args[1] == "farm" || args[1] == "econ") tab = 2;
+        else if (args[1] == "4" || args[1] == "mod" || args[1] == "cheat") tab = 3;
+        else filter = args[1];
+    }
+    ProxyCommand::show_commands_gui(client->get_player(), g_core_proxy, filter, tab);
 }
 
-void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, const std::string& filter, const std::string& category) {
+static std::vector<std::string> get_categories_for_tab(int tab) {
+    switch (tab) {
+        case 0: return {"move", "world", "cosmetic"};
+        case 1: return {"casino"};
+        case 2: return {"econ"};
+        case 3: return {"mod", "auto"};
+        default: return {"move", "world", "cosmetic"};
+    }
+}
+
+void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, const std::string& filter, int active_tab) {
     if (!player) {
         spdlog::error("ProxyCommand: player is null!");
         return;
     }
 
-    auto* server = core->get_server();
-    if (!server || !server->get_player()) {
-        spdlog::error("ProxyCommand: No server available!");
+    auto* server = core ? core->get_server() : nullptr;
+    auto* target_player = (server && server->get_player()) ? server->get_player() : player;
+    if (!target_player) {
+        spdlog::error("ProxyCommand: No player available!");
         return;
     }
+
+    s_current_proxy_tab = active_tab;
 
     try {
         const auto& all_cmds = get_all_commands();
         const auto& all_cats = get_categories();
+        auto tab_cats = get_categories_for_tab(active_tab);
 
         std::string filter_lower = to_lower(trim(filter));
 
         std::ostringstream dialog;
         dialog << "set_default_color|`o\n";
-        dialog << "add_label_with_icon|big|`wVinProxy Commands and Features``|left|5956|\n";
+
+        // 4 Custom Tabs docked directly on top of dialog header
+        dialog << "start_custom_tabs|\n";
+        dialog << fmt::format("add_custom_button|proxy_tab_0|image:interface/large/btn_tabs1.rttex;image_size:228,92;frame:{},0;width:0.14;|\n", active_tab == 0 ? 1 : 0);
+        dialog << fmt::format("add_custom_button|proxy_tab_1|image:interface/large/btn_tabs1.rttex;image_size:228,92;frame:{},1;width:0.14;|\n", active_tab == 1 ? 1 : 0);
+        dialog << fmt::format("add_custom_button|proxy_tab_2|image:interface/large/btn_tabs1.rttex;image_size:228,92;frame:{},2;width:0.14;|\n", active_tab == 2 ? 1 : 0);
+        dialog << fmt::format("add_custom_button|proxy_tab_3|image:interface/large/btn_tabs1.rttex;image_size:228,92;frame:{},3;width:0.14;|\n", active_tab == 3 ? 1 : 0);
+        dialog << "end_custom_tabs|\n";
         dialog << "add_spacer|small|\n";
 
-        size_t match_count = 0;
-        for (const auto& c : all_cmds) {
-            if (!filter_lower.empty()) {
-                std::string search_target = to_lower(c.cmd + " " + c.args + " " + c.desc + " " + c.aliases + " " + c.category);
-                if (search_target.find(filter_lower) == std::string::npos) continue;
-            }
-            if (category != "all" && !category.empty() && c.category != category) continue;
-            match_count++;
-        }
-
-        if (!filter_lower.empty()) {
-            dialog << "add_smalltext|`9Filtered Results for '`w" << filter << "`9' • Found: `w" << match_count << " Commands``|\n";
+        // Tab Header Title
+        if (active_tab == 0) {
+            dialog << "add_label_with_icon|big|`wVinProxy: `2Main Features``|left|5956|\n";
+        } else if (active_tab == 1) {
+            dialog << "add_label_with_icon|big|`wVinProxy: `6Casino & CSN Host``|left|758|\n";
+        } else if (active_tab == 2) {
+            dialog << "add_label_with_icon|big|`wVinProxy: `eFarming & Drops``|left|2978|\n";
         } else {
-            dialog << "add_smalltext|`9Complete Command Directory • Total: `w" << all_cmds.size() << " Commands``|\n";
+            dialog << "add_label_with_icon|big|`wVinProxy: `4Moderation & Cheats``|left|32|\n";
         }
         dialog << "add_spacer|small|\n";
 
-        dialog << "add_text_input|proxy_search|Search:|" << filter << "|30|\n";
-        dialog << "add_button|search_btn|Search|noflags|0|0|\n";
+        // Tab Subheader & Description
+        if (active_tab == 0) {
+            dialog << "add_smalltext|`2[PAGE 1] `wMain: `9Movement, Navigation, Pathfinding, World & Clothes``|\n";
+        } else if (active_tab == 1) {
+            dialog << "add_smalltext|`6[PAGE 2] `wCSN Host: `9Auto-Tax, Host Calculator, Drop Checkpoints & Drops``|\n";
+            dialog << "add_smalltext|`w* Quick Host Guide: `oSet bets with `6/pos1`o & `6/pos2`o (or punch `6/spos1`o/`6/spos2`o)``|\n";
+            dialog << "add_smalltext|`w* Auto-Payout: `oWarp, calculate tax & drop prize automatically via `6/w1`o and `6/w2`o``|\n";
+            dialog << "add_smalltext|`w* Security: `oBlock unwanted casino broadcasts with `6/ignorecsn`o & `6/ignorecsnchat`o``|\n";
+        } else if (active_tab == 2) {
+            dialog << "add_smalltext|`e[PAGE 3] `wFarming: `9Fast Drop, Auto-Collect, Gems, Compress, Vends & Bank``|\n";
+        } else {
+            dialog << "add_smalltext|`4[PAGE 4] `wCheats: `9Mod Detection, Ghost/Invis, Immunity, Spam & Surgery``|\n";
+        }
+        dialog << "add_smalltext|`#════════════════════════════════════════════════════════════════════════════════════════════``|\n";
         dialog << "add_spacer|small|\n";
 
-        // Display all categories and their commands compactly
-        for (size_t i = 0; i < all_cats.size(); ++i) {
-            const auto& cat = all_cats[i];
-            if (category != "all" && !category.empty() && cat.id != category) continue;
+        // Render matching categories and commands
+        for (const auto& cat : all_cats) {
+            bool is_cat_in_tab = std::find(tab_cats.begin(), tab_cats.end(), cat.id) != tab_cats.end();
+            if (filter_lower.empty() && !is_cat_in_tab) continue;
 
             std::vector<const CommandDoc*> cat_cmds;
             for (const auto& c : all_cmds) {
@@ -320,9 +362,9 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, c
 
         // Footer
         dialog << "add_spacer|small|\n";
-        dialog << "add_smalltext|`9Auto-save enabled for positions, clothes slots & features!``|\n";
+        dialog << "add_smalltext|`9Click tabs above to switch pages! Auto-save enabled.``|\n";
+        dialog << "end_dialog|proxy_commands_gui|Close||\n";
         dialog << "add_quick_exit|\n";
-        dialog << "end_dialog|proxy_commands_gui|Close||";
 
         std::string dialog_data = dialog.str();
 
@@ -343,9 +385,9 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, c
         byte_stream.write(game_packet);
         byte_stream.write_data(ext_data.data(), ext_data.size());
 
-        server->get_player()->send_packet(byte_stream.get_data(), 0);
+        target_player->send_packet(byte_stream.get_data(), 0);
 
-        spdlog::info("ProxyCommand: GUI sent successfully");
+        spdlog::info("ProxyCommand: Tabbed GUI sent (tab={}, dialog_name=proxy_commands_gui)", active_tab);
 
     } catch (const std::exception& e) {
         spdlog::error("ProxyCommand: Failed to send GUI: {}", e.what());
@@ -354,8 +396,45 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, c
 
 void ProxyCommand::handle_dialog_return(player::Player* player, const std::string& button_clicked, const std::string& search_query) {
     if (!player || !g_core_proxy) return;
-    if (button_clicked == "search_btn" || (!search_query.empty() && button_clicked != "close")) {
-        ProxyCommand::show_commands_gui(player, g_core_proxy, search_query);
+
+    int new_tab = -1;
+    if (button_clicked == "proxy_tab_0") new_tab = 0;
+    else if (button_clicked == "proxy_tab_1") new_tab = 1;
+    else if (button_clicked == "proxy_tab_2") new_tab = 2;
+    else if (button_clicked == "proxy_tab_3") new_tab = 3;
+
+    if (new_tab != -1) {
+        if (s_switching_tab.exchange(true)) {
+            spdlog::debug("ProxyCommand: Tab switch in progress, ignoring click on tab {}", new_tab);
+            return;
+        }
+
+        s_current_proxy_tab = new_tab;
+
+        spdlog::info("ProxyCommand: Tab {} clicked. Dialog closed, re-triggering /proxy in 500ms...", new_tab);
+
+        // Allow the Growtopia client to cleanly finish closing all dialogs on screen
+        // before re-triggering the /proxy dialog with the newly selected tab.
+        std::thread([core = g_core_proxy, player, new_tab]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            try {
+                auto* server = core ? core->get_server() : nullptr;
+                auto* send_to = (server && server->get_player()) ? server->get_player() : player;
+                if (send_to && send_to->is_connected()) {
+                    ProxyCommand::show_commands_gui(send_to, core, "", new_tab);
+                    spdlog::info("ProxyCommand: Automatically re-triggered /proxy for tab {}", new_tab);
+                }
+            } catch (const std::exception& e) {
+                spdlog::error("ProxyCommand: Failed to re-trigger /proxy: {}", e.what());
+            }
+            s_switching_tab = false;
+        }).detach();
+        return;
+    }
+
+    if (button_clicked == "search_btn" || (!search_query.empty() && button_clicked != "Close" && button_clicked != "close")) {
+        ProxyCommand::show_commands_gui(player, g_core_proxy, search_query, 0);
+        return;
     }
 }
 
@@ -383,7 +462,7 @@ void InfoCommand::execute(client::Client* client, const std::vector<std::string>
     }
 
     std::string filter = args.empty() ? "" : args[0];
-    ProxyCommand::show_commands_gui(client->get_player(), g_core_info, filter, "all");
+    ProxyCommand::show_commands_gui(client->get_player(), g_core_info, filter, 0);
 }
 
 } 

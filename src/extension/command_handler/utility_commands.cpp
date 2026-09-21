@@ -3441,8 +3441,19 @@ void DialogCommand::execute(client::Client* client, const std::vector<std::strin
     auto local_player = tracker.get_local_player();
 
     if (args.size() < 2) {
-        send_console(server->get_player(), "`4Usage: /dialog <dialog_str>");
+        send_console(server->get_player(), "`4Usage: /dialog <dialog_str> `oor `2/dialog tabs");
         send_console(server->get_player(), "`9Example: /dialog add_label_with_icon|big|Test Dialog|left|242|");
+        send_console(server->get_player(), "`2Example tabs demo: /dialog tabs");
+        return;
+    }
+
+    if (args.size() >= 2 && (args[1] == "tabs" || args[1] == "tabdemo")) {
+        int initial_tab = 0;
+        if (args.size() >= 3) {
+            try { initial_tab = std::clamp(std::stoi(args[2]), 0, 2); } catch (...) { initial_tab = 0; }
+        }
+        send_tab_dialog(server->get_player(), initial_tab);
+        send_console(server->get_player(), fmt::format("`2[VinProxy] `9Displaying Tabbed Dialog demo (Tab {}, Click tabs to switch!)", initial_tab));
         return;
     }
 
@@ -3452,6 +3463,13 @@ void DialogCommand::execute(client::Client* client, const std::vector<std::strin
         dialog_str += args[i];
     }
 
+    // Replace literal "\n" sequences with real newlines for multi-line dialogs
+    size_t pos = 0;
+    while ((pos = dialog_str.find("\\n", pos)) != std::string::npos) {
+        dialog_str.replace(pos, 2, "\n");
+        pos += 1;
+    }
+
     packet::Variant var{};
     var.add("OnDialogRequest");
     var.add(dialog_str);
@@ -3459,7 +3477,7 @@ void DialogCommand::execute(client::Client* client, const std::vector<std::strin
     std::vector<std::byte> ext_data = var.serialize();
     packet::GameUpdatePacket pkt{};
     pkt.type = packet::PACKET_CALL_FUNCTION;
-    pkt.net_id = local_player.netID;
+    pkt.net_id = -1;
     pkt.flags.extended = 1;
     pkt.data_size = static_cast<uint32_t>(ext_data.size());
 
@@ -3472,6 +3490,80 @@ void DialogCommand::execute(client::Client* client, const std::vector<std::strin
     
     spdlog::info("OnDialogRequest sent: {}", dialog_str);
     send_console(server->get_player(), "`9OnDialogRequest packet sent");
+}
+
+void DialogCommand::send_tab_dialog(player::Player* player, int active_tab) {
+    if (!s_core) return;
+    auto* server = s_core->get_server();
+    if (!server || !server->get_player()) return;
+    player = server->get_player();
+
+    std::ostringstream dialog;
+    dialog << "set_default_color|`o\n";
+    dialog << "add_quick_exit|\n";
+
+    // --- Fixed tab buttons at top of dialog ---
+    dialog << "start_custom_tabs|\n";
+    dialog << fmt::format("add_custom_button|myWorldsUiTab_0|image:interface/large/btn_tabs2.rttex;image_size:228,92;frame:{},0;width:0.15;|\n", active_tab == 0 ? 1 : 0);
+    dialog << fmt::format("add_custom_button|myWorldsUiTab_1|image:interface/large/btn_tabs2.rttex;image_size:228,92;frame:{},1;width:0.15;|\n", active_tab == 1 ? 1 : 0);
+    dialog << fmt::format("add_custom_button|myWorldsUiTab_2|image:interface/large/btn_tabs2.rttex;image_size:228,92;frame:{},2;width:0.15;|\n", active_tab == 2 ? 1 : 0);
+    dialog << "end_custom_tabs|\n";
+    dialog << "add_spacer|small|\n";
+
+    // --- Tab content (changes based on active_tab) ---
+    if (active_tab == 0) {
+        // Tab 0: Locked Worlds
+        dialog << "add_label|big|`wLocked Worlds``|left|0|\n";
+        dialog << "add_spacer|small|\n";
+        dialog << "add_textbox|You must be a Supporter or Super Supporter to Warp to these worlds.|left|\n";
+        dialog << "add_textbox|Place a World Lock in a world to lock it. Break your World Lock to unlock a world.|left|\n";
+        dialog << "add_spacer|small|\n";
+        dialog << "add_button|btn_locked_1|`wVINPROXY12WE``|noflags|0|0|\n";
+        dialog << "add_button|btn_locked_2|`wTESTWORLD``|noflags|0|0|\n";
+        dialog << "add_button|btn_locked_3|`wBUYGHC``|noflags|0|0|\n";
+    } else if (active_tab == 1) {
+        // Tab 1: Home World
+        dialog << "add_label|big|`wHome World``|left|0|\n";
+        dialog << "add_spacer|small|\n";
+        dialog << "add_textbox|You can set your home world with /sethome command.|left|\n";
+        dialog << "add_spacer|small|\n";
+        dialog << "add_button|btn_warp_home|`2Warp to Home World``|noflags|0|0|\n";
+        dialog << "add_button|btn_set_home|`9Set Current as Home``|noflags|0|0|\n";
+    } else {
+        // Tab 2: Favorite Worlds
+        dialog << "add_label|big|`wFavorite Worlds``|left|0|\n";
+        dialog << "add_spacer|small|\n";
+        dialog << "add_textbox|Your favorite worlds are listed below. Click to warp!|left|\n";
+        dialog << "add_spacer|small|\n";
+        dialog << "add_button|btn_fav_1|`9START``|noflags|0|0|\n";
+        dialog << "add_button|btn_fav_2|`9BUYGHC``|noflags|0|0|\n";
+        dialog << "add_button|btn_fav_3|`9TRADE``|noflags|0|0|\n";
+        dialog << "add_button|btn_fav_4|`9FARM123``|noflags|0|0|\n";
+        dialog << "add_button|btn_fav_5|`9CASINO``|noflags|0|0|\n";
+    }
+
+    dialog << "add_quick_exit|\n";
+    dialog << fmt::format("end_dialog|test_tab_dialog_{}|Close||\n", active_tab);
+
+    std::string dialog_str = dialog.str();
+    packet::Variant var{};
+    var.add("OnDialogRequest");
+    var.add(dialog_str);
+
+    std::vector<std::byte> ext_data = var.serialize();
+    packet::GameUpdatePacket pkt{};
+    pkt.type = packet::PACKET_CALL_FUNCTION;
+    pkt.net_id = -1;
+    pkt.flags.extended = 1;
+    pkt.data_size = static_cast<uint32_t>(ext_data.size());
+
+    ByteStream<std::uint16_t> bs{};
+    bs.write(packet::NET_MESSAGE_GAME_PACKET);
+    bs.write(pkt);
+    bs.write_data(ext_data.data(), ext_data.size());
+
+    player->send_packet(bs.get_data(), 0);
+    spdlog::info("DialogCommand: Sent tab dialog active_tab={} (str_len={})", active_tab, dialog_str.size());
 }
 
 

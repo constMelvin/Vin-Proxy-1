@@ -69,6 +69,12 @@ add_executable(${PROJECT_NAME}
     ${GTPROXY_INCLUDE_FILES}
     ${GTPROXY_SOURCE_FILES})
 
+# Disable vcpkg MSBuild integration for this project (uses conan instead)
+# vcpkg's fmt v12 conflicts with conan's spdlog which expects an older fmt
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    VS_GLOBAL_VcpkgEnabled false
+)
+
 find_package(fmt REQUIRED)
 find_package(glm REQUIRED)
 find_package(magic_enum REQUIRED)

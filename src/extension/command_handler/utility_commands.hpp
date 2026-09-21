@@ -444,6 +444,7 @@ public:
     std::unique_ptr<CommandBase> clone() const override;
     
     static void set_core(core::Core* core);
+    static void send_tab_dialog(player::Player* player, int active_tab = 0);
     
 private:
     static core::Core* s_core;

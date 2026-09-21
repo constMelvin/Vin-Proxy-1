@@ -639,6 +639,32 @@ public:
         }
     }
 
+    static void send_raw_dialog(player::Player* player, const std::string& dialog_data) {
+        if (!player) return;
+        try {
+            packet::Variant variant{};
+            variant.add("OnDialogRequest");
+            variant.add(dialog_data);
+            
+            std::vector<std::byte> ext_data = variant.serialize();
+
+            packet::GameUpdatePacket game_packet{};
+            game_packet.type = packet::PACKET_CALL_FUNCTION;
+            game_packet.net_id = -1;
+            game_packet.flags.extended = 1;
+            game_packet.data_size = static_cast<uint32_t>(ext_data.size());
+
+            ByteStream<std::uint16_t> byte_stream{};
+            byte_stream.write(packet::NET_MESSAGE_GAME_PACKET);
+            byte_stream.write(game_packet);
+            byte_stream.write_data(ext_data.data(), ext_data.size());
+
+            player->send_packet(byte_stream.get_data(), 0);
+        } catch (const std::exception& e) {
+            spdlog::error("send_raw_dialog failed: {}", e.what());
+        }
+    }
+
 private:
     void handle_chat_message(const core::EventMessage& event) {
         if (event.from != core::EventFrom::FromClient) {
@@ -776,11 +802,30 @@ private:
                 event.canceled = true;
                 return;
             }
-            else if (dialog_name == "proxy_commands_gui") {
+            else if (button_clicked.rfind("proxy_tab_", 0) == 0 || dialog_name.rfind("proxy_gui", 0) == 0 || dialog_name == "proxy_commands_gui") {
                 auto* server = core_->get_server();
                 if (server && server->get_player()) {
                     std::string search = text_parse.get("proxy_search");
                     command::ProxyCommand::handle_dialog_return(server->get_player(), button_clicked, search);
+                }
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name != "worlds_list" && (dialog_name.rfind("test_tab_dialog", 0) == 0 || button_clicked.rfind("myWorldsUiTab_", 0) == 0 || button_clicked.rfind("tab_", 0) == 0)) {
+                int next_tab = -1;
+                if (button_clicked == "myWorldsUiTab_0" || button_clicked == "tab_0") next_tab = 0;
+                else if (button_clicked == "myWorldsUiTab_1" || button_clicked == "tab_1") next_tab = 1;
+                else if (button_clicked == "myWorldsUiTab_2" || button_clicked == "tab_2") next_tab = 2;
+
+                if (next_tab != -1) {
+                    auto* server = core_->get_server();
+                    if (server && server->get_player()) {
+                        auto* p = server->get_player();
+                        std::thread([p, next_tab]() {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(180));
+                            command::DialogCommand::send_tab_dialog(p, next_tab);
+                        }).detach();
+                    }
                 }
                 event.canceled = true;
                 return;
