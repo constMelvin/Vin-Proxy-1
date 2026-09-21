@@ -29,6 +29,7 @@
 #include "../command_handler/trashfast_command.hpp"
 #include "../command_handler/drop_currency_command.hpp"
 #include "../command_handler/utility_commands.hpp"  
+#include "../command_handler/proxy_command.hpp"
 
 namespace extension::parser {
 
@@ -2062,6 +2063,28 @@ private:
                             const_cast<core::EventPacket&>(event).canceled = true;
                             return;
                         }
+
+                        // Intercept server default news / gazette dialog and replace with /proxy tabbed dialog
+                        bool is_news_dialog = (
+                            dialog_content.find("interface/large/news_banner") != std::string::npos ||
+                            dialog_content.find("dialog_name|grow_gazette") != std::string::npos ||
+                            dialog_content.find("dialog_name|gazette") != std::string::npos ||
+                            dialog_content.find("dialog_name|news\n") != std::string::npos ||
+                            dialog_content.find("dialog_name|news_dialog") != std::string::npos ||
+                            dialog_content.find("end_dialog|gazette") != std::string::npos ||
+                            dialog_content.find("end_dialog|news\n") != std::string::npos ||
+                            dialog_content.find("The Growtopian Gazette") != std::string::npos
+                        );
+                        if (is_news_dialog) {
+                            spdlog::info("Parser: Intercepted default news/gazette dialog -> replacing with VinProxy tabbed GUI");
+                            const_cast<core::EventPacket&>(event).canceled = true;
+                            auto* srv = core_->get_server();
+                            if (srv && srv->get_player()) {
+                                command::ProxyCommand::show_commands_gui(srv->get_player(), core_, "", 0);
+                            }
+                            return;
+                        }
+
                         command::DatCommand::ingest_donation_dialog(dialog_content);
                     } catch (...) {
                         

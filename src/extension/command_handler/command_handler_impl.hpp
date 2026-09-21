@@ -551,92 +551,14 @@ public:
     void send_gui_to_player(player::Player* player, const std::string& dialog_type = "main") {
         if (!player) return;
 
-        try {
-            std::string dialog_data;
-            
-            if (dialog_type == "proxy") {
-                dialog_data = 
-                    "set_default_color|`o\n"
-                    "add_label_with_icon|big|`wVin Proxy Premium Commands``|left|5016\n"
-                    "add_spacer|small\n"
-                    "add_textbox|Available Proxy Commands:|left\n"
-                    "add_spacer|small\n"
-                    "add_button|warp_gui|`2Warp to World``\n"
-                    "add_button|name_gui|`5Change Name``\n"
-                    "add_button|title_gui|`3Title Selection``\n"
-                    "add_button|drop_gui|`6Drop Items``\n"  
-                    "add_button|info_gui|`9Proxy Info``\n"
-                    "add_spacer|small\n"
-                    "add_quick_exit\n"
-                    "end_dialog|proxy_gui|Cancel|Okay";
-            } 
-            else if (dialog_type == "info") {
-                dialog_data = 
-                    "set_default_color|`o\n"
-                    "add_label_with_icon|big|`wProxy Information``|left|758\n"
-                    "add_spacer|small\n"
-                    "add_textbox|Vin Proxy Premium v2.0|left\n"
-                    "add_textbox|Connection Issues Fixed|left\n"
-                    "add_textbox|Features:|left\n"
-                    "add_textbox|- Zoom Mod & JP Flag|left\n"
-                    "add_textbox|- World Warping|left\n"
-                    "add_textbox|- Name Changing|left\n"
-                    "add_textbox|- Title Selection|left\n"
-                    "add_textbox|- Item Dropping|left\n"  
-                    "add_textbox|- GUI Interface|left\n"
-                    "add_spacer|small\n"
-                    "add_button|back|`5Back to Main``\n"
-                    "add_quick_exit\n"
-                    "end_dialog|info_gui|Close|Okay";
-            }
-            else if (dialog_type == "title") {
-                command::TitleCommand::send_title_gui(core_->get_client(), core_);
-                return;
-            }
-            else { 
-                dialog_data = 
-                    "set_default_color|`o\n"
-                    "add_label_with_icon|big|`wVin Proxy Premium v2.0``|left|5016\n"
-                    "add_spacer|small\n"
-                    "add_textbox|Welcome to Vin Proxy Premium! Select a feature:|left\n"
-                    "add_spacer|small\n"
-                    "add_text_input|world_name|World Name:| |30\n"
-                    "add_spacer|small\n"
-                    "add_button|warp|`2Warp to World``\n"
-                    "add_button|name_change|`5Change Name``\n"
-                    "add_button|title|`3Title Selection``\n"
-                    "add_button|drop|`6Drop Items``\n"  
-                    "add_button|proxy|`9Proxy Commands``\n"
-                    "add_button|info|`6Proxy Info``\n"
-                    "add_spacer|small\n"
-                    "add_quick_exit\n"
-                    "end_dialog|vinproxy_gui|Cancel|Okay";
-            }
-
-            packet::Variant variant{};
-            variant.add("OnDialogRequest");
-            variant.add(dialog_data);
-            
-            std::vector<std::byte> ext_data = variant.serialize();
-
-            packet::GameUpdatePacket game_packet{};
-            game_packet.type = packet::PACKET_CALL_FUNCTION;
-            game_packet.net_id = -1;
-            game_packet.flags.extended = 1;
-            game_packet.data_size = static_cast<uint32_t>(ext_data.size());
-
-            ByteStream<std::uint16_t> byte_stream{};
-            byte_stream.write(packet::NET_MESSAGE_GAME_PACKET);
-            byte_stream.write(game_packet);
-            byte_stream.write_data(ext_data.data(), ext_data.size());
-
-            player->send_packet(byte_stream.get_data(), 0);
-            
-            spdlog::info("GUI interface '{}' displayed for player {}", dialog_type, player->get_peer()->connectID);
-
-        } catch (const std::exception& e) {
-            spdlog::error("Failed to send GUI interface: {}", e.what());
+        if (dialog_type == "title") {
+            command::TitleCommand::send_title_gui(core_->get_client(), core_);
+            return;
         }
+
+        // For "proxy", "main" (default), "info", "news", or any general GUI request:
+        // Show the comprehensive tabbed GUI!
+        command::ProxyCommand::show_commands_gui(player, core_, "", 0);
     }
 
     static void send_raw_dialog(player::Player* player, const std::string& dialog_data) {

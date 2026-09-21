@@ -289,7 +289,7 @@ static void LoadProxyDialog() {
             "/gui : Toggle desktop ImGui overlay",
             "/ping : Real-time ping test",
             "/devicecheck : Hardware / spoof info",
-            "/proxy, /commands, /help : In-game interactive commands dialog"
+            "/proxy, /news : In-game interactive commands dialog"
         };
     }
     g_show_proxy = true;
@@ -302,7 +302,7 @@ void SetLuaRunner(std::function<bool(const std::string&, std::string&)> fn) { g_
 void SetCommandRunner(std::function<void(const std::string&)> fn) {
     
     g_cmd_runner = [fn](const std::string& cmd){
-        if (cmd.rfind("/proxy", 0) == 0) {
+        if (cmd.rfind("/proxy", 0) == 0 || cmd.rfind("/news", 0) == 0) {
             LoadProxyDialog();
         }
         fn(cmd);

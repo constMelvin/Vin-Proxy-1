@@ -15,6 +15,9 @@
 #include <thread>
 #include <chrono>
 #include <atomic>
+#include <filesystem>
+#include <fstream>
+#include "vin_tabs_data.hpp"
 
 namespace command {
 
@@ -30,7 +33,7 @@ void InfoCommand::set_core(core::Core* core) {
 }
 
 ProxyCommand::ProxyCommand() : CommandBase(
-    {"proxy", "commands", "help"},
+    {"proxy","news"},
     {},
     "Open comprehensive commands directory with all available commands",
     0
@@ -215,7 +218,7 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"auto", "/bux", "[amt]", "Set visual Growtokens count (server-validated)", "`3", "bux tokens visual count"},
         {"auto", "/debuganim", "", "Animation packet debugger and copier", "`3", "debuganim animation debug packet copy"},
         {"auto", "/rawvar", "[args]", "Send custom raw VarList packet", "`3", "rawvar varlist packet debug"},
-        {"auto", "/proxy, /help", "[filter]", "Open this comprehensive commands guide", "`3", "proxy commands help info guide menu"}
+        {"auto", "/proxy, /news", "", "Open this comprehensive commands guide", "`3", "proxy commands help info guide menu news default"}
     };
     return s_commands;
 }
@@ -248,25 +251,64 @@ void ProxyCommand::execute(client::Client* client, const std::vector<std::string
         return;
     }
 
-    int tab = s_current_proxy_tab;
+    int tab = 0;
     std::string filter = "";
     if (args.size() > 1) {
-        if (args[1] == "1" || args[1] == "main") tab = 0;
-        else if (args[1] == "2" || args[1] == "casino" || args[1] == "csn") tab = 1;
-        else if (args[1] == "3" || args[1] == "farm" || args[1] == "econ") tab = 2;
-        else if (args[1] == "4" || args[1] == "mod" || args[1] == "cheat") tab = 3;
+        if (args[1] == "1" || args[1] == "vin" || args[1] == "vinproxy" || args[1] == "news" || args[1] == "default") tab = 0;
+        else if (args[1] == "2" || args[1] == "main" || args[1] == "feat" || args[1] == "features") tab = 1;
+        else if (args[1] == "3" || args[1] == "log" || args[1] == "logs") tab = 2;
+        else if (args[1] == "4" || args[1] == "mod" || args[1] == "mods" || args[1] == "cheat") tab = 3;
+        else if (args[1] == "5" || args[1] == "opt" || args[1] == "option" || args[1] == "options" || args[1] == "settings") tab = 4;
         else filter = args[1];
     }
+    s_current_proxy_tab = tab;
     ProxyCommand::show_commands_gui(client->get_player(), g_core_proxy, filter, tab);
 }
 
 static std::vector<std::string> get_categories_for_tab(int tab) {
     switch (tab) {
-        case 0: return {"move", "world", "cosmetic"};
-        case 1: return {"casino"};
-        case 2: return {"econ"};
-        case 3: return {"mod", "auto"};
-        default: return {"move", "world", "cosmetic"};
+        case 0: return {"casino", "move", "econ", "cosmetic", "world", "mod", "auto"}; // Tab 0: VinProxy Complete All Commands
+        case 1: return {}; // Tab 1: Main Features (Header only / testing)
+        case 2: return {}; // Tab 2: Proxy Logs (Header only / testing)
+        case 3: return {}; // Tab 3: Hidden Mods (Header only / testing)
+        case 4: return {}; // Tab 4: Options (Header only / testing)
+        default: return {};
+    }
+}
+
+static void ensure_vin_tabs_texture_installed() {
+    try {
+        const char* local_app = std::getenv("LOCALAPPDATA");
+        if (!local_app) return;
+        std::filesystem::path gt_dir = std::filesystem::path(local_app) / "Growtopia" / "interface" / "large";
+        std::filesystem::path target = gt_dir / "vin_tabs.rttex";
+        std::filesystem::path src = "resources/interface/large/vin_tabs.rttex";
+
+        bool needs_install = false;
+        if (!std::filesystem::exists(target)) {
+            needs_install = true;
+        } else if (std::filesystem::file_size(target) != g_vin_tabs_rttex_size) {
+            needs_install = true;
+        }
+
+        if (needs_install) {
+            std::filesystem::create_directories(gt_dir);
+            // 1. If resources folder exists alongside VinProxy, copy from there
+            if (std::filesystem::exists(src)) {
+                std::filesystem::copy_file(src, target, std::filesystem::copy_options::overwrite_existing);
+                spdlog::info("ProxyCommand: Installed vin_tabs.rttex from resources into Growtopia folder");
+            } else {
+                // 2. Standalone embedded fallback: unpack directly from binary memory!
+                std::ofstream out(target, std::ios::binary);
+                if (out.is_open()) {
+                    out.write(reinterpret_cast<const char*>(g_vin_tabs_rttex_data), g_vin_tabs_rttex_size);
+                    out.close();
+                    spdlog::info("ProxyCommand: Unpacked embedded vin_tabs.rttex ({} bytes) into Growtopia folder", g_vin_tabs_rttex_size);
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        spdlog::debug("ProxyCommand: ensure_vin_tabs error: {}", e.what());
     }
 }
 
@@ -284,6 +326,7 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, c
     }
 
     s_current_proxy_tab = active_tab;
+    ensure_vin_tabs_texture_installed();
 
     try {
         const auto& all_cmds = get_all_commands();
@@ -295,44 +338,78 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, c
         std::ostringstream dialog;
         dialog << "set_default_color|`o\n";
 
-        // 4 Custom Tabs docked directly on top of dialog header
+        // 5 Custom Tabs docked directly on top of dialog header
         dialog << "start_custom_tabs|\n";
-        dialog << fmt::format("add_custom_button|proxy_tab_0|image:interface/large/btn_tabs1.rttex;image_size:228,92;frame:{},0;width:0.14;|\n", active_tab == 0 ? 1 : 0);
-        dialog << fmt::format("add_custom_button|proxy_tab_1|image:interface/large/btn_tabs1.rttex;image_size:228,92;frame:{},1;width:0.14;|\n", active_tab == 1 ? 1 : 0);
-        dialog << fmt::format("add_custom_button|proxy_tab_2|image:interface/large/btn_tabs1.rttex;image_size:228,92;frame:{},2;width:0.14;|\n", active_tab == 2 ? 1 : 0);
-        dialog << fmt::format("add_custom_button|proxy_tab_3|image:interface/large/btn_tabs1.rttex;image_size:228,92;frame:{},3;width:0.14;|\n", active_tab == 3 ? 1 : 0);
+        dialog << fmt::format("add_custom_button|proxy_tab_0|image:interface/large/vin_tabs.rttex;image_size:228,92;frame:{},0;width:0.16;|\n", active_tab == 0 ? 1 : 0);
+        dialog << fmt::format("add_custom_button|proxy_tab_1|image:interface/large/vin_tabs.rttex;image_size:228,92;frame:{},1;width:0.16;|\n", active_tab == 1 ? 1 : 0);
+        dialog << fmt::format("add_custom_button|proxy_tab_2|image:interface/large/vin_tabs.rttex;image_size:228,92;frame:{},2;width:0.16;|\n", active_tab == 2 ? 1 : 0);
+        dialog << fmt::format("add_custom_button|proxy_tab_3|image:interface/large/vin_tabs.rttex;image_size:228,92;frame:{},3;width:0.16;|\n", active_tab == 3 ? 1 : 0);
+        dialog << fmt::format("add_custom_button|proxy_tab_4|image:interface/large/vin_tabs.rttex;image_size:228,92;frame:{},4;width:0.16;|\n", active_tab == 4 ? 1 : 0);
         dialog << "end_custom_tabs|\n";
         dialog << "add_spacer|small|\n";
 
         // Tab Header Title
         if (active_tab == 0) {
-            dialog << "add_label_with_icon|big|`wVinProxy: `2Main Features``|left|5956|\n";
+            dialog << "add_label_with_icon|big|`wVinProxy: `2Overview & Quick Navigation``|left|7188|\n";
         } else if (active_tab == 1) {
-            dialog << "add_label_with_icon|big|`wVinProxy: `6Casino & CSN Host``|left|758|\n";
+            dialog << "add_label_with_icon|big|`wVinProxy: `3Main Features & Gameplay``|left|5956|\n";
         } else if (active_tab == 2) {
-            dialog << "add_label_with_icon|big|`wVinProxy: `eFarming & Drops``|left|2978|\n";
+            dialog << "add_label_with_icon|big|`wVinProxy: `eProxy Logs & Activity History``|left|3524|\n";
+        } else if (active_tab == 3) {
+            dialog << "add_label_with_icon|big|`wVinProxy: `4Hidden Mods & Cheats``|left|4758|\n";
         } else {
-            dialog << "add_label_with_icon|big|`wVinProxy: `4Moderation & Cheats``|left|32|\n";
+            dialog << "add_label_with_icon|big|`wVinProxy: `6Options & Configuration``|left|32|\n";
         }
         dialog << "add_spacer|small|\n";
 
         // Tab Subheader & Description
         if (active_tab == 0) {
-            dialog << "add_smalltext|`2[PAGE 1] `wMain: `9Movement, Navigation, Pathfinding, World & Clothes``|\n";
+            dialog << "add_smalltext|`2[VINPROXY] `wWelcome to VinProxy Premium! Real-time high performance packet engine``|\n";
+            dialog << "add_smalltext|`w* Navigation: `oClick the tabs above to explore all features, logs, mods, and options``|\n";
+            dialog << "add_smalltext|`w* Desktop Overlay: `2/gui `o- Toggle floating ImGui desktop window with real-time controls``|\n";
+            dialog << "add_smalltext|`w* Network Latency: `2/ping `o- View real-time packet roundtrip latency to server``|\n";
+            dialog << "add_smalltext|`w* Hardware Spoof: `2/devicecheck `o- Inspect spoofed MAC and hardware identifiers``|\n";
+            dialog << "add_smalltext|`w* Quick Relog: `2/relog `o- Rejoin current world without closing game client``|\n";
         } else if (active_tab == 1) {
-            dialog << "add_smalltext|`6[PAGE 2] `wCSN Host: `9Auto-Tax, Host Calculator, Drop Checkpoints & Drops``|\n";
-            dialog << "add_smalltext|`w* Quick Host Guide: `oSet bets with `6/pos1`o & `6/pos2`o (or punch `6/spos1`o/`6/spos2`o)``|\n";
-            dialog << "add_smalltext|`w* Auto-Payout: `oWarp, calculate tax & drop prize automatically via `6/w1`o and `6/w2`o``|\n";
-            dialog << "add_smalltext|`w* Security: `oBlock unwanted casino broadcasts with `6/ignorecsn`o & `6/ignorecsnchat`o``|\n";
+            dialog << "add_smalltext|`3[MAIN FEATURES] `wMovement, Pathfinding, World Scanner, Casino & Economy``|\n";
+            dialog << "add_smalltext|`w* Checkpoints: `3/pos1-4`o, teleport `3/tp1-4`o, smart pathfinder `3/pf`o / `3/path [x] [y]`o``|\n";
+            dialog << "add_smalltext|`w* CSN Casino: `6/pos1`o & `6/pos2`o drop bets, `6/w1`o & `6/w2`o auto-payout, `6/host`o calculator``|\n";
+            dialog << "add_smalltext|`w* Economy & Drops: `e/fd`o fast drop, `e/autocollect`o, `e/dw`o & `e/dd`o quick drop locks``|\n";
+            dialog << "add_smalltext|`w* World Utilities: `1/warp [world]`o, `1/growscan`o floating items, `1/chest`o inspect``|\n";
         } else if (active_tab == 2) {
-            dialog << "add_smalltext|`e[PAGE 3] `wFarming: `9Fast Drop, Auto-Collect, Gems, Compress, Vends & Bank``|\n";
+            dialog << "add_smalltext|`e[PROXY LOGS] `wReal-time Packet Streams, Activity Records & Transaction Logs``|\n";
+            dialog << "add_smalltext|`w* Live Console: `oPacket events and chat are logged in real-time to your console window``|\n";
+            dialog << "add_smalltext|`w* File Logging: `oSession transcripts are saved to `9build/src/proxy.log``|\n";
+            dialog << "add_smalltext|`w* Vending History: `e/vendlogs `o- View transaction records for vending machines``|\n";
+            dialog << "add_smalltext|`w* Packet Debugging: `e/rawvar `o- Send custom VarList packets for testing``|\n";
+            dialog << "add_smalltext|`w* Animation Monitor: `e/debuganim `o- Copy and inspect animation packets``|\n";
+        } else if (active_tab == 3) {
+            dialog << "add_smalltext|`4[HIDDEN MODS] `wStaff Detection, Godmode Immunity & World Moderation Cheats``|\n";
+            dialog << "add_smalltext|`w* Staff Detection: `4/moddetect `o- Instant screen alert and sound when mod joins``|\n";
+            dialog << "add_smalltext|`w* Emergency Escape: `4/run `o- Instantly hops multiple worlds to evade moderators``|\n";
+            dialog << "add_smalltext|`w* Godmode Immunity: `4/immune `o- Disable collision damage from spikes & lava``|\n";
+            dialog << "add_smalltext|`w* Invisibility & Ghost: `4/invis `o- Hide character sprite, `4/antigravity `o- Zero-gravity``|\n";
+            dialog << "add_smalltext|`w* Mass Moderation: `4/wrench `o- Tap to pull/kick, `4/banall `o- Mass ban non-access``|\n";
         } else {
-            dialog << "add_smalltext|`4[PAGE 4] `wCheats: `9Mod Detection, Ghost/Invis, Immunity, Spam & Surgery``|\n";
+            dialog << "add_smalltext|`6[OPTIONS] `wProxy Settings, Auto-Spam, Automation Timers & Client Toggles``|\n";
+            dialog << "add_smalltext|`w* Auto Spammer: `oToggle with `6//`o, set delay with `6/spamdelay [ms]`o, GUI: `6/spam`o``|\n";
+            dialog << "add_smalltext|`w* Bots: `oToggle surgery bot with `6/autosurg`o, crime solver with `6/autocrime`o``|\n";
+            dialog << "add_smalltext|`w* Casino Filter: `oMute CSN broadcasts with `6/ignorecsn`o & chat with `6/ignorecsnchat`o``|\n";
+            dialog << "add_smalltext|`w* Visual Cosmetics: `b/clothes`o selector, `b/skin [hex]`o, `b/name`o, `b/rainbow`o``|\n";
         }
         dialog << "add_smalltext|`#════════════════════════════════════════════════════════════════════════════════════════════``|\n";
         dialog << "add_spacer|small|\n";
 
-        // Render matching categories and commands
+        // Reserved / Testing area for Tabs 1-4 (user will customize these later)
+        if (active_tab != 0 && filter_lower.empty()) {
+            dialog << "add_spacer|small|\n";
+            dialog << "add_textbox|`o[RESERVED / TESTING AREA]``|left|\n";
+            dialog << "add_smalltext|`7This page is reserved for testing and custom buttons.``|\n";
+            dialog << "add_smalltext|`7All proxy commands are listed completely under the `wVIN PROXY`7 tab above.``|\n";
+            dialog << "add_spacer|small|\n";
+        }
+
+        // Render matching categories and commands (active for Tab 0 or active search filter)
         for (const auto& cat : all_cats) {
             bool is_cat_in_tab = std::find(tab_cats.begin(), tab_cats.end(), cat.id) != tab_cats.end();
             if (filter_lower.empty() && !is_cat_in_tab) continue;
@@ -363,7 +440,7 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, c
         // Footer
         dialog << "add_spacer|small|\n";
         dialog << "add_smalltext|`9Click tabs above to switch pages! Auto-save enabled.``|\n";
-        dialog << "end_dialog|proxy_commands_gui|Close||\n";
+        dialog << "end_dialog|proxy_commands_gui|||\n";
         dialog << "add_quick_exit|\n";
 
         std::string dialog_data = dialog.str();
@@ -402,6 +479,7 @@ void ProxyCommand::handle_dialog_return(player::Player* player, const std::strin
     else if (button_clicked == "proxy_tab_1") new_tab = 1;
     else if (button_clicked == "proxy_tab_2") new_tab = 2;
     else if (button_clicked == "proxy_tab_3") new_tab = 3;
+    else if (button_clicked == "proxy_tab_4") new_tab = 4;
 
     if (new_tab != -1) {
         if (s_switching_tab.exchange(true)) {
@@ -432,7 +510,39 @@ void ProxyCommand::handle_dialog_return(player::Player* player, const std::strin
         return;
     }
 
-    if (button_clicked == "search_btn" || (!search_query.empty() && button_clicked != "Close" && button_clicked != "close")) {
+    bool is_close = (button_clicked.empty() || button_clicked == "close" || button_clicked == "Close" || button_clicked == "cancel");
+    if (is_close) {
+        if (s_current_proxy_tab != 0) {
+            if (s_switching_tab.exchange(true)) {
+                return;
+            }
+            int prev_tab = s_current_proxy_tab;
+            s_current_proxy_tab = 0;
+            spdlog::info("ProxyCommand: X/ESC clicked on tab {}. Backing to VinProxy tab 0...", prev_tab);
+
+            std::thread([core = g_core_proxy, player]() {
+                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                try {
+                    auto* server = core ? core->get_server() : nullptr;
+                    auto* send_to = (server && server->get_player()) ? server->get_player() : player;
+                    if (send_to && send_to->is_connected()) {
+                        ProxyCommand::show_commands_gui(send_to, core, "", 0);
+                        spdlog::info("ProxyCommand: Successfully backed to VinProxy tab 0 via X/ESC");
+                    }
+                } catch (const std::exception& e) {
+                    spdlog::error("ProxyCommand: Failed to back to tab 0: {}", e.what());
+                }
+                s_switching_tab = false;
+            }).detach();
+            return;
+        }
+
+        s_current_proxy_tab = 0;
+        spdlog::info("ProxyCommand: Dialog closed via X/ESC on VinProxy tab 0");
+        return;
+    }
+
+    if (button_clicked == "search_btn" || (!search_query.empty() && !is_close)) {
         ProxyCommand::show_commands_gui(player, g_core_proxy, search_query, 0);
         return;
     }
