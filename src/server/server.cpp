@@ -20,6 +20,7 @@
 #include "../extension/command_handler/position_command.hpp"
 #include "../utils/items_dat_patcher.hpp"
 #include "../utils/gems_manager.hpp"
+#include "../utils/packet_utils.hpp"
 
 namespace server {
 namespace {
@@ -160,20 +161,26 @@ void Server::on_receive(ENetPeer* peer, ENetPacket* packet)
         spdlog::warn("Real server client not ready yet, queuing packet...");
         
         
-        for (int i = 0; i < 150; i++) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        for (int i = 0; i < 200; i++) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
             if (core_ && core_->get_client()) {
                 core_->get_client()->process();
             }
             to_player = core_->get_client()->get_player();
             if (to_player) {
-                spdlog::info("Client connected after waiting {}ms", (i + 1) * 20);
+                spdlog::info("Client connected after waiting {}ms", (i + 1) * 25);
                 break;
             }
         }
         
         if (!to_player) {
-            spdlog::warn("Real server still not connected, dropping packet");
+            spdlog::warn("[SHADOWBAN DETECTED] Real server still not connected after 5s! Dropping packet and alerting client.");
+            if (player_ && player_->is_connected()) {
+                utils::PacketUtils::send_shadowban_alert(player_, "Connection timed out!");
+                if (peer && peer->host) {
+                    enet_host_flush(peer->host);
+                }
+            }
             enet_packet_destroy(packet);
             return; 
         }

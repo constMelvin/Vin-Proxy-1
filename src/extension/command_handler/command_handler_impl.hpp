@@ -67,6 +67,7 @@
 #include "immune_command.hpp"
 #include "search_command.hpp"
 #include "balance_command.hpp"
+#include "extended_commands.hpp"
 #include "../../core/core.hpp"
 #include "../../client/client.hpp"
 #include "../../server/server.hpp"
@@ -358,6 +359,59 @@ public:
         register_command(std::make_unique<command::CPosCommand>());
         register_command(std::make_unique<command::CasinoTPCommand>());
         register_command(std::make_unique<command::WinCommand>());
+
+        // =====================================================
+        // Extended Commands
+        // =====================================================
+        command::ShowXYCommand::set_core(core_);
+        command::UidCommand::set_core(core_);
+        command::ScanCommand::set_core(core_);
+        command::TrackCommand::set_core(core_);
+        command::GhostCommand::set_core(core_);
+        command::AutoMsgCommand::set_core(core_);
+        command::AutoPullCommand::set_core(core_);
+        command::FastRecycleCommand::set_core(core_);
+        command::WrenchMsgCommand::set_core(core_);
+        command::WrenchSpamCommand::set_core(core_);
+        command::BlinkCommand::set_core(core_);
+        command::FastVendToggleCommand::set_core(core_);
+        command::SpeedCommand::set_core(core_);
+        command::SetTaxCommand::set_core(core_);
+        command::GameBetCommand::set_core(core_);
+        command::GDropCommand::set_core(core_);
+        command::CollectCommand::set_core(core_);
+        command::CountryListCommand::set_core(core_);
+        command::WorldOptionsCommand::set_core(core_);
+        command::AutoFishCommand::set_core(core_);
+        command::AutoFarmCommand::set_core(core_);
+        command::HotkeysCommand::set_core(core_);
+        command::OptionsPageCommand::set_core(core_);
+        command::DropBGLAliasCommand::set_core(core_);
+
+        register_command(std::make_unique<command::ShowXYCommand>());
+        register_command(std::make_unique<command::UidCommand>());
+        register_command(std::make_unique<command::ScanCommand>());
+        register_command(std::make_unique<command::TrackCommand>());
+        register_command(std::make_unique<command::GhostCommand>());
+        register_command(std::make_unique<command::AutoMsgCommand>());
+        register_command(std::make_unique<command::AutoPullCommand>());
+        register_command(std::make_unique<command::FastRecycleCommand>());
+        register_command(std::make_unique<command::WrenchMsgCommand>());
+        register_command(std::make_unique<command::WrenchSpamCommand>());
+        register_command(std::make_unique<command::BlinkCommand>());
+        register_command(std::make_unique<command::FastVendToggleCommand>());
+        register_command(std::make_unique<command::SpeedCommand>());
+        register_command(std::make_unique<command::SetTaxCommand>());
+        register_command(std::make_unique<command::GameBetCommand>());
+        register_command(std::make_unique<command::GDropCommand>());
+        register_command(std::make_unique<command::CollectCommand>());
+        register_command(std::make_unique<command::CountryListCommand>());
+        register_command(std::make_unique<command::WorldOptionsCommand>());
+        register_command(std::make_unique<command::AutoFishCommand>());
+        register_command(std::make_unique<command::AutoFarmCommand>());
+        register_command(std::make_unique<command::HotkeysCommand>());
+        register_command(std::make_unique<command::OptionsPageCommand>());
+        register_command(std::make_unique<command::DropBGLAliasCommand>());
 
         spdlog::trace("Registered {} commands", commands_.size());
 
@@ -940,7 +994,7 @@ private:
                                 is_punch_state);
 
         if ((shift_held && is_click_packet) || is_cheat_key) {
-            // LuckyProxy Shift + Click pathfinding / teleport everywhere:
+            // VinProxy Shift + Click pathfinding / teleport everywhere:
             // Works with ANY item selected (fist, wrench, blocks, seeds, tools, etc.)
             // The packet is immediately cancelled so no block is ever placed or punch sent to the server.
             if (tank) {
@@ -958,7 +1012,7 @@ private:
                 }
 
                 if (tx >= 0 && ty >= 0) {
-                    spdlog::info("[SHIFT-CLICK / LUCKY PROXY] type={}, tx={}, ty={}",
+                    spdlog::info("[SHIFT-CLICK / VIN PROXY] type={}, tx={}, ty={}",
                         static_cast<int>(game_packet.type), tx, ty);
                     client::Client* client = core_->get_client();
                     if (client) {

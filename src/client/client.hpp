@@ -12,7 +12,7 @@ public:
     explicit Client(core::Core* core);
     ~Client();
 
-    [[nodiscard]] ENetPeer* connect(const std::string& host, enet_uint16 port) const;
+    [[nodiscard]] ENetPeer* connect(const std::string& host, enet_uint16 port);
     void process();
 
     void on_connect(ENetPeer* peer);

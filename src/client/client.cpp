@@ -42,25 +42,13 @@ namespace {
 
 std::chrono::steady_clock::time_point g_connect_attempt_time{};
 bool g_connect_pending = false;
-constexpr int CONNECT_TIMEOUT_SEC = 10;
+constexpr int CONNECT_TIMEOUT_SEC = 8;
 
 
 void send_connection_error_msg(player::Player* to_player) {
     if (!to_player) return;
-    packet::Variant var{};
-    var.add("OnConsoleMessage");
-    var.add("`4[Connection Error]`` Can't reach the server. Try using a `$VPN``, or `4close GT and the proxy then relog``.");
-    std::vector<std::byte> ext_data = var.serialize();
-    packet::GameUpdatePacket pkt{};
-    pkt.type = packet::PACKET_CALL_FUNCTION;
-    pkt.net_id = -1;
-    pkt.flags.extended = 1;
-    pkt.data_size = static_cast<uint32_t>(ext_data.size());
-    ByteStream<std::uint16_t> bs{};
-    bs.write(packet::NET_MESSAGE_GAME_PACKET);
-    bs.write(pkt);
-    bs.write_data(ext_data.data(), ext_data.size());
-    to_player->send_packet(bs.get_data(), 0);
+    utils::PacketUtils::send_shadowban_alert(to_player, "Connection timed out!");
+    spdlog::warn("[SHADOWBAN DETECTED] Connection timed out! Change IP, switch VPN, or use SOCKS5.");
 }
 
 
@@ -202,11 +190,14 @@ Client::~Client()
     delete player_;
 }
 
-ENetPeer* Client::connect(const std::string& host, const enet_uint16 port) const
+ENetPeer* Client::connect(const std::string& host, const enet_uint16 port)
 {
     if (!host_) {
         return nullptr;
     }
+
+    g_connect_attempt_time = std::chrono::steady_clock::now();
+    g_connect_pending = true;
 
     ENetAddress address{};
     enet_address_set_host(&address, host.c_str());
@@ -227,9 +218,11 @@ void Client::process()
         const auto sec = std::chrono::duration_cast<std::chrono::seconds>(now - g_connect_attempt_time).count();
         if (sec >= CONNECT_TIMEOUT_SEC) {
             g_connect_pending = false;
-            spdlog::warn("[CONNECTION] Server did not respond within {}s", CONNECT_TIMEOUT_SEC);
-            const player::Player* local = core_->get_server()->get_player();
-            send_connection_error_msg(const_cast<player::Player*>(local));
+            spdlog::warn("[CONNECTION] Server did not respond within {}s - Shadowban detected!", CONNECT_TIMEOUT_SEC);
+            player::Player* local = core_->get_server()->get_player();
+            if (local && local->is_connected()) {
+                send_connection_error_msg(local);
+            }
         }
     }
 
@@ -1156,11 +1149,15 @@ void Client::on_disconnect(ENetPeer* peer)
         return;
     }
 
-    
-    send_connection_error_msg(const_cast<player::Player*>(to_player));
+    if (g_connect_pending) {
+        g_connect_pending = false;
+        send_connection_error_msg(const_cast<player::Player*>(to_player));
+    }
 
-    enet_host_flush(host_);
-    to_player->disconnect_now();
+    if (to_player->get_peer() && to_player->get_peer()->host) {
+        enet_host_flush(to_player->get_peer()->host);
+    }
+    to_player->disconnect_later();
     core_->get_server()->on_disconnect(to_player->get_peer());
 }
 }

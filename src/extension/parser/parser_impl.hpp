@@ -1183,31 +1183,59 @@ private:
                         }
 
                         
-                        if (message.find("Timed out") != std::string::npos || 
-                            message.find("Error connecting!") != std::string::npos) {
-                            message = "`4[Shadowban Detected] `oConnection timed out! IP or Sub-Server is rate-limited. Switch VPN/Proxy IP.";
-                            
-                            // Send follow-up console message for Player Authentication: Failed.
-                            packet::Variant auth_var{};
-                            auth_var.add("OnConsoleMessage");
-                            auth_var.add("`^[VinProxy Premium]`o `4Player Authentication: Failed.");
-                            std::vector<std::byte> auth_ext = auth_var.serialize();
-                            
-                            packet::GameUpdatePacket auth_pkt = event.get_packet();
-                            auth_pkt.data_size = static_cast<uint32_t>(auth_ext.size());
-                            ByteStream<std::uint16_t> auth_bs{};
-                            auth_bs.write(packet::NET_MESSAGE_GAME_PACKET);
-                            auth_bs.write(auth_pkt);
-                            auth_bs.write_data(auth_ext.data(), auth_ext.size());
-                            event.get_target().send_packet(auth_bs.get_data(), 0);
-                        } else if (message.find("Player Authentication: Failed") != std::string::npos ||
-                                   message.find("Authentication: Failed") != std::string::npos) {
-                            message = "`4[Shadowban Detected] `oPlayer Authentication: Failed. Logon IP flagged or session token invalid!";
+                        const std::string clean_lower_check = to_lower(strip_gt_codes(message));
+                        bool is_shadowban_msg = 
+                            clean_lower_check.find("timed out") != std::string::npos ||
+                            clean_lower_check.find("error connecting") != std::string::npos ||
+                            clean_lower_check.find("unable to log on") != std::string::npos ||
+                            clean_lower_check.find("unable to connect") != std::string::npos ||
+                            clean_lower_check.find("authentication: failed") != std::string::npos ||
+                            clean_lower_check.find("authentication failed") != std::string::npos ||
+                            clean_lower_check.find("account suspended") != std::string::npos ||
+                            clean_lower_check.find("temporary ban") != std::string::npos ||
+                            clean_lower_check.find("too many people") != std::string::npos;
+
+                        if (is_shadowban_msg) {
+                            spdlog::warn("[SHADOWBAN DETECTED] Server connection/auth error: {}", message);
+                            AppendLog("[SHADOWBAN DETECTED] " + strip_gt_codes(message));
+
+                            // 1. Single combined Shadowban alert message (without VinProxy Premium)
+                            {
+                                packet::Variant alert_var{};
+                                alert_var.add("OnConsoleMessage");
+                                alert_var.add("`#[Shadowban] `oConnection timed out! Change your IP, switch VPN, or use SOCKS5.");
+                                std::vector<std::byte> alert_ext = alert_var.serialize();
+                                packet::GameUpdatePacket alert_pkt = event.get_packet();
+                                alert_pkt.data_size = static_cast<uint32_t>(alert_ext.size());
+                                ByteStream<std::uint16_t> alert_bs{};
+                                alert_bs.write(packet::NET_MESSAGE_GAME_PACKET);
+                                alert_bs.write(alert_pkt);
+                                alert_bs.write_data(alert_ext.data(), alert_ext.size());
+                                event.get_target().send_packet(alert_bs.get_data(), 0);
+                            }
+
+                            // 2. Player Authentication: Failed
+                            {
+                                packet::Variant auth_var{};
+                                auth_var.add("OnConsoleMessage");
+                                auth_var.add("`9Player Authentication: `4Failed");
+                                std::vector<std::byte> auth_ext = auth_var.serialize();
+                                packet::GameUpdatePacket auth_pkt = event.get_packet();
+                                auth_pkt.data_size = static_cast<uint32_t>(auth_ext.size());
+                                ByteStream<std::uint16_t> auth_bs{};
+                                auth_bs.write(packet::NET_MESSAGE_GAME_PACKET);
+                                auth_bs.write(auth_pkt);
+                                auth_bs.write_data(auth_ext.data(), auth_ext.size());
+                                event.get_target().send_packet(auth_bs.get_data(), 0);
+                            }
+
+                            const_cast<core::EventPacket&>(event).canceled = true;
+                            return;
                         }
 
                         if (message.find("VinProxy Premium") == std::string::npos) {
                             
-                            std::string prefixed_message = "`^[VinProxy Premium]`o " + message;
+                            std::string prefixed_message = "`^[VinProxy Premium] `o " + message;
                             
                             packet::Variant new_variant{};
                             new_variant.add("OnConsoleMessage");

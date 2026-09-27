@@ -20,7 +20,7 @@ public:
 
         packet::message::Log message_packet{};
         if (add_prefix) {
-            message_packet.msg = "`^[VinProxy Premium]`o " + message;
+            message_packet.msg = "`^[VinProxy Premium] `o " + message;
         } else {
             message_packet.msg = message;
         }
@@ -48,17 +48,63 @@ public:
             std::vector<std::byte> ext_data = variant.serialize();
             packet::GameUpdatePacket game_packet{};
             game_packet.type = packet::PACKET_CALL_FUNCTION;
-            game_packet.net_id = -1;
+            game_packet.net_id = static_cast<uint32_t>(-1);
             game_packet.flags.extended = 1;
             game_packet.data_size = static_cast<uint32_t>(ext_data.size());
             ByteStream<std::uint16_t> byte_stream{};
             byte_stream.write(packet::NET_MESSAGE_GAME_PACKET);
             byte_stream.write(game_packet);
             byte_stream.write_data(ext_data.data(), ext_data.size());
-            player->send_packet(byte_stream.get_data(), 0);
+            (void)player->send_packet(byte_stream.get_data(), 0);
             spdlog::debug("PacketUtils: Sent dismiss_active_dialog packet");
         } catch (const std::exception& e) {
             spdlog::error("PacketUtils: Failed to dismiss active dialog: {}", e.what());
+        }
+    }
+
+    static void send_shadowban_alert(player::Player* player, const std::string& reason = "Connection timed out!") {
+        if (!player || !player->is_connected()) return;
+        try {
+            // 1. Single combined Shadowban alert message (without VinProxy Premium)
+            {
+                packet::Variant var{};
+                var.add("OnConsoleMessage");
+                var.add("`#[Shadowban] `o" + reason + " Change your IP, switch VPN, or use SOCKS5.");
+                std::vector<std::byte> ext = var.serialize();
+                packet::GameUpdatePacket pkt{};
+                pkt.type = packet::PACKET_CALL_FUNCTION;
+                pkt.net_id = static_cast<uint32_t>(-1);
+                pkt.flags.extended = 1;
+                pkt.data_size = static_cast<uint32_t>(ext.size());
+                ByteStream<std::uint16_t> bs{};
+                bs.write(packet::NET_MESSAGE_GAME_PACKET);
+                bs.write(pkt);
+                bs.write_data(ext.data(), ext.size());
+                (void)player->send_packet(bs.get_data(), 0);
+            }
+            // 2. Player Authentication: Failed message
+            {
+                packet::Variant auth_var{};
+                auth_var.add("OnConsoleMessage");
+                auth_var.add("`9Player Authentication: `4Failed");
+                std::vector<std::byte> auth_ext = auth_var.serialize();
+                packet::GameUpdatePacket auth_pkt{};
+                auth_pkt.type = packet::PACKET_CALL_FUNCTION;
+                auth_pkt.net_id = static_cast<uint32_t>(-1);
+                auth_pkt.flags.extended = 1;
+                auth_pkt.data_size = static_cast<uint32_t>(auth_ext.size());
+                ByteStream<std::uint16_t> auth_bs{};
+                auth_bs.write(packet::NET_MESSAGE_GAME_PACKET);
+                auth_bs.write(auth_pkt);
+                auth_bs.write_data(auth_ext.data(), auth_ext.size());
+                (void)player->send_packet(auth_bs.get_data(), 0);
+            }
+
+            if (player->get_peer() && player->get_peer()->host) {
+                enet_host_flush(player->get_peer()->host);
+            }
+        } catch (const std::exception& e) {
+            spdlog::error("PacketUtils: Failed to send shadowban alert: {}", e.what());
         }
     }
 };

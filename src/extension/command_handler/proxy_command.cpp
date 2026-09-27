@@ -46,10 +46,10 @@ std::unique_ptr<CommandBase> ProxyCommand::clone() const {
 struct CommandDoc {
     std::string category;     // "move", "econ", "cosmetic", "world", "mod", "auto"
     std::string cmd;          // e.g. "/pos1 - /pos4"
-    std::string args;         // e.g. "[world]"
-    std::string desc;         // description
-    std::string color;        // "`2", "`e", "`b", "`1", "`4", "`3"
-    std::string aliases;      // search keywords
+    std::string args = "";    // e.g. "[world]"
+    std::string desc = "";    // description
+    std::string color = "`2"; // default cmd color: "`2"
+    std::string aliases = ""; // search keywords
 };
 
 struct CategoryInfo {
@@ -61,164 +61,204 @@ struct CategoryInfo {
 
 static const std::vector<CategoryInfo>& get_categories() {
     static const std::vector<CategoryInfo> s_cats = {
-        {"casino",   "Casino & CSN Host",             "`6", 758},
-        {"move",     "Position & Movement",           "`2", 242},
-        {"econ",     "Economy, Drops & Vending",       "`e", 2978},
-        {"cosmetic", "Clothes & Visual Customization", "`b", 1784},
-        {"world",    "World, Scanner & Navigation",    "`1", 6878},
-        {"mod",      "Admin, Moderation & Cheats",     "`4", 32},
-        {"auto",     "Automation & Utilities",         "`3", 3410}
+        {"info",   "Info:",             "`e", 2920},
+        {"customize",     "Customize:",           "`e", 12436},
+        {"mf",     "Main Features:",       "`e", 14544},
+        {"casino",    "Auto Hoster:",    "`e", 758},
+        {"econ",   "Economy & Drops:",   "`e", 242},
+        {"visual", "Clothes & Visual Customization:", "`e", 1784},
+        {"information",      "Information:",     "`e", 3524},
+        {"sc",     "Shortcuts:",         "`e", 1794},
+        {"of", "Other Features:", "`e", 7612}
     };
     return s_cats;
 }
 
 static const std::vector<CommandDoc>& get_all_commands() {
     static const std::vector<CommandDoc> s_commands = {
-        // --- 0. Casino & CSN Host ---
-        {"casino", "/tp", "", "Teleport to bets & collect with 1.5 reach, calc prize with tax", "`6", "tp casino bet collect prize tax"},
-        {"casino", "/pos1, /pos2", "", "Set drop pos 1 & 2 via player coords (VFX + select)", "`6", "pos1 pos2 drop position csn bet"},
-        {"casino", "/spos1, /spos2", "", "Set drop pos 1 & 2 by punching a tile", "`6", "spos1 spos2 punch position tile csn"},
-        {"casino", "/cpos1, /cpos2", "", "Check & highlight saved drop positions 1 & 2", "`6", "cpos1 cpos2 check highlight pos"},
-        {"casino", "/w1, /win1", "", "Warp to player 1 zone, drop prize (BGL/DL/WL), return", "`6", "w1 win1 win player1 drop prize"},
-        {"casino", "/w2, /win2", "", "Warp to player 2 zone, drop prize (BGL/DL/WL), return", "`6", "w2 win2 win player2 drop prize"},
-        {"casino", "/host", "", "Open CSN casino hoster calculator & dialog", "`6", "host csn casino calculator roulette hoster"},
-        {"casino", "/qq", "[on/off]", "Toggle Show QQ Number in roulette spin", "`6", "qq showqq number host csn"},
-        {"casino", "/reme", "[on/off]", "Toggle Show REME Spin in roulette spin", "`6", "reme showreme spin host csn"},
-        {"casino", "/ignorecsn", "", "Block CSN casino broadcast messages", "`6", "ignorecsn csn block ignore broadcast"},
-        {"casino", "/ignorecsnchat", "", "Block CSN casino chat bubbles", "`6", "ignorecsnchat csn chat ignore mute"},
+        // --- 0. Info ---
+        {"info", "/proxy", "", "(Shows Commands & Help Directory)"},
+        {"info", "/news", "", "(Shows Proxy News and Commands)"},
+        {"info", "/gui", "", "(Open Floating ImGui Desktop Window)"},
+        {"info", "/ping", "", "(Toggle Real-Time Ping Latency Display)"},
+        {"info", "/eventmenu", "", "(Open Live Event Menu)"},
+        {"info", "/discord", "", "(Join Proxy Discord Community)"},
+        {"info", "/showxy", "", "(Show X,Y Tile Coordinate Position)"},
+        {"info", "/uid", "", "(Show Current Player UID)"},
+        {"info", "/scan", "", "(Toggle World Item Scan / Extract Mode)"},
+        {"info", "/track", "", "(Toggle Drop Tracker - Logs All Drops In World)"},
 
-        // --- 1. Position & Movement ---
-        {"move", "/pos1 - /pos4", "", "Save checkpoint 1-4 with ring particle VFX (#88)", "`2", "pos1 pos2 pos3 pos4 pos checkpoint ring"},
-        {"move", "/posback, /setback", "", "Save current position as back checkpoint", "`2", "posback setback checkpoint"},
-        {"move", "/tp1 - /tp4", "", "Instant teleport to saved position 1-4", "`2", "tp1 tp2 tp3 tp4 teleport"},
-        {"move", "/back, /BACK", "", "Teleport back to saved pos (or previous world)", "`2", "back BACK return teleport"},
-        {"move", "/pf", "", "Toggle pathfinder mode on/off without dialog", "`2", "pf toggle shift click"},
-        {"move", "/pathfind", "", "Open LuckyProxy-style Pathfinder Options dialog", "`2", "pathfind pathfinding dialog options"},
-        {"move", "/path", "[x] [y]", "Walk pathfinding to coordinates (or Shift+Click)", "`2", "path findpath walk astar"},
-        {"move", "/stop", "", "Cancel current pathfinding walk immediately", "`2", "stop cancel walk"},
-        {"move", "/playertp", "[name/netid]", "Teleport directly to player in world", "`2", "playertp ptp tp player"},
-        {"move", "/setpos", "[x] [y]", "Send raw OnSetPos position update packet", "`2", "setpos rawpos teleport"},
+        // --- 1. Customize ---
+        {"customize", "/flag", "[itemID]", "(Sets Country Flag To Item ID)"},
+        {"customize", "/countrylist", "", "(Shows All Country Flag IDs List)"},
+        {"customize", "/name", "[name]", "(Set Visual Display Name)"},
+        {"customize", "/title", "", "(Open Title Selection GUI)"},
+        {"customize", "/world", "", "(Toggle World Options: Chat, PVP, Nametags)"},
+        {"customize", "/pathfind, /pf", "", "(Pathfinder Settings Page)"},
+        {"customize", "/hotkeys", "", "(Configure Chat Command Hotkey Shortcuts)"},
+        {"customize", "/options", "", "(Open All Selectable Feature Options Page)"},
 
-        // --- 2. Economy, Drops & Vending ---
-        {"econ", "/fd, /fastdrop", "", "Toggle fast drop mode (auto-confirms drop dialogs)", "`e", "fd fastdrop"},
-        {"econ", "/dropall", "", "Drop all items from inventory", "`e", "dropall alldrop"},
-        {"econ", "/dropall", "[amt]", "Drop specified amount of each item from inventory", "`e", "dropall alldrop amt amount quantity"},
-        {"econ", "/dpos", "", "Set drop position where your character stands (like pos1-4)", "`e", "dpos drop position pos"},
-        {"econ", "/dropat", "[amt]", "Teleport to /dpos position and drop items", "`e", "dropat dpos drop amt"},
-        {"econ", "/daw, /dawl", "", "Drop all World Locks, Diamond Locks, and BGLs from inventory", "`e", "daw dawl dropalllocks dropallwl"},
-        {"econ", "/dw", "[amt]", "Drop World Locks (e.g. /dw 50)", "`e", "dw dropwl wl"},
-        {"econ", "/dd", "[amt]", "Drop Diamond Locks (e.g. /dd 150 = 1dl 50wl)", "`e", "dd dropdl dl"},
-        {"econ", "/dbgl", "[amt]", "Drop Blue Gem Locks (e.g. /dbgl 5)", "`e", "dbgl dropbgl bgl"},
-        {"econ", "/balance, /bal", "", "Check total currency balance (WL / DL / BGL)", "`e", "balance bal currency locks"},
-        {"econ", "/autocomp", "", "Toggle auto-compress (100 WL->DL, 100 DL->BGL)", "`e", "autocomp compress locks currency"},
-        {"econ", "/autocollect", "", "Toggle auto-collect nearby dropped items", "`e", "autocollect collect magnet suck"},
-        {"econ", "/bank", "", "Open World Lock bank deposit & withdraw dialog", "`e", "bank locks deposit withdraw"},
-        {"econ", "/bankadd", "[amt]", "Deposit World Locks into bank", "`e", "bankadd deposit bank"},
-        {"econ", "/bankwith", "[amt]", "Withdraw World Locks from bank", "`e", "bankwith withdraw bank"},
-        {"econ", "/bankcheck", "", "Check bank account balance", "`e", "bankcheck balance bank"},
-        {"econ", "/vendloc", "", "Scan & list all vending machines in world", "`e", "vendloc vends vending scan list"},
-        {"econ", "/vendfind, /vendtp", "[item]", "Find & highlight vending machine with item", "`e", "vendfind vendtp find vend"},
-        {"econ", "/vendfast", "", "Open fast vending setup configuration dialog", "`e", "vendfast quickvend setup vend"},
-        {"econ", "/vendsafe", "", "Toggle safe vending auto-buyer helper (anti-scam)", "`e", "vendsafe safebuy buyer vend"},
-        {"econ", "/vendlogs", "", "View transaction logs for vending machines", "`e", "vendlogs logs history vend"},
-        {"econ", "/buy", "", "Open in-game item purchase dialog", "`e", "buy store purchase"},
-        {"econ", "/fillgbc", "", "Auto-fill Golden Blast into wishing well", "`e", "fillgbc gbc well blast"},
-        {"econ", "/dbox", "", "Toggle fast donation box drop mode", "`e", "dbox donation drop"},
-        {"econ", "/setdb", "[amt]", "Set donation box drop amount", "`e", "setdb amount donation"},
-        {"econ", "/trashfast", "", "Fast trash items without confirmation dialog", "`e", "trashfast trash delete recycle"},
-        {"econ", "/mailclaim", "[id]", "Auto-claim mailbox message reward", "`e", "mailclaim mailbox mail claim"},
-        {"econ", "/bid", "[amt]", "Place auction house bid on current auction", "`e", "bid auction wls"},
+        // --- 2. Main Features ---
+        {"mf", "/speed", "[1-5]", "(Select Movement Speed Multiplier)"},
+        {"mf", "/wrench", "", "(Select Wrench Mode: Pull/Kick/Ban)"},
+        {"mf", "/wrenchmsg", "", "(Toggle Show Wrench Chat Messages)"},
+        {"mf", "/wrenchspam", "", "(Toggle Wrench Spam Auto Mode)"},
+        {"mf", "/spam", "", "(Toggle AutoSpam Options)"},
+        {"mf", "//", "", "(Shortcut To Enable/Disable Chat Auto-Spam)"},
+        {"mf", "/spamdelay", "<ms>", "(Set Auto-Spam Delay In Milliseconds)"},
+        {"mf", "/automsg", "", "(Toggle Auto-Message Broadcast Bot)"},
+        {"mf", "/autopull", "", "(Toggle Auto Pull Players Who Enter World)"},
+        {"mf", "/autosurg", "", "(Toggle AutoSurgery Options)"},
+        {"mf", "/surg", "", "(Enables AutoSurgery)"},
+        {"mf", "/autocrime", "", "(Toggle AutoCrime Options)"},
+        {"mf", "/crime", "", "(Enables AutoCrime)"},
+        {"mf", "/join", "", "(Auto Ban/Pull/Kick When Player Joins)"},
+        {"mf", "/vendfast", "", "(Fast Vend Page: Empty, Stock, Buy)"},
+        {"mf", "/fastvend", "", "(Enable/Disable Fast Vend Auto-Stock)"},
+        {"mf", "/buy", "", "(Fast Growtopia Shop Purchase Page)"},
+        {"mf", "/host", "", "(Casino Host Settings & Custom Tax Amount)"},
+        {"mf", "/growscan", "", "(Free Fully Functional Growscan On Punch/Scan)"},
+        {"mf", "/collect", "", "(Collect Floating Items Within 10 Tiles Range)"},
+        {"mf", "/count", "", "(Edit Drop/Trash/Recycle/Vend Count Settings)"},
+        {"mf", "/fd", "", "(Enable/Disable Fast Drop Auto-Confirm)"},
+        {"mf", "/ft", "", "(Enable/Disable Fast Trash Auto-Confirm)"},
+        {"mf", "/fr", "", "(Enable/Disable Fast Recycle Auto-Confirm)"},
+        {"mf", "/afish", "", "(Auto Fish Bot - Automatically Catches Fish)"},
+        {"mf", "/afarm", "", "(Auto Farm Bot - Automatically Punches & Farms)"},
+        {"mf", "/autocollect", "", "(Toggle Auto Collect Floating Dropped Items)"},
+        {"mf", "/ac", "", "(Shortcut To Enable Autocollect)"},
+        {"mf", "/autocomp", "", "(Compress 100 WLs to 1 DL Automatically)"},
+        {"mf", "/banall", "", "(Bans Everyone In The World Without Access)"},
+        {"mf", "/pullall", "", "(Pulls Everyone In The World)"},
+        {"mf", "/banfire", "", "(Toggle Auto-Ban Fire Mode For Pocket Lighter Grief)"},
+        {"mf", "/ghost", "", "(Toggle Moderator Ghost Mode - Visual Invis State)"},
 
-        // --- 3. Clothes, Visuals & Cosmetics ---
-        {"cosmetic", "/clothes", "[ids...]", "Open visual clothes selector GUI or equip IDs", "`b", "clothes wear equip items skin"},
-        {"cosmetic", "/clearclothes", "", "Remove all visual clothes items", "`b", "clearclothes unequip naked reset"},
-        {"cosmetic", "/save1 - /save4", "", "Save current clothes loadout to slot 1-4", "`b", "save1 save2 save3 save4 set1 set2 set3 set4 slot"},
-        {"cosmetic", "/load1 - /load4", "", "Equip clothes loadout from slot 1-4", "`b", "load1 load2 load3 load4 slot equip"},
-        {"cosmetic", "/skin", "[hex]", "Set skin color (e.g. 0xFFFFFF, 0x000000)", "`b", "skin color hex rgb"},
-        {"cosmetic", "/name", "[col] [name]", "Change visual display nickname and color", "`b", "name nick nickname color rename"},
-        {"cosmetic", "/title", "", "Open title selection GUI (Legend, Doctor, etc.)", "`b", "title dr maxlevel g4g doctor legend"},
-        {"cosmetic", "/cleartitle", "", "Reset and clear current visual title", "`b", "cleartitle reset title"},
-        {"cosmetic", "/titleicon", "[id]", "Set visual title icon badge", "`b", "titleicon icon badge title"},
-        {"cosmetic", "/flag", "[code]", "Change country flag (us, id, tr, lb, etc.)", "`b", "flag country nation icon"},
-        {"cosmetic", "/roleskin", "[skin] [icon]", "Apply legendary role skin & icon", "`b", "roleskin role skin badge"},
-        {"cosmetic", "/disguise", "[id]", "Disguise yourself as item (0 to reset)", "`b", "disguise morph item transform"},
-        {"cosmetic", "/deathanim", "[id]", "Set custom death animation ID", "`b", "deathanim anim death animation"},
-        {"cosmetic", "/respawnanim", "[id]", "Set custom respawn animation ID", "`b", "respawnanim anim respawn spawn"},
-        {"cosmetic", "/itemfx", "[id]", "Trigger visual item effect on yourself", "`b", "itemfx effect visual vfx"},
-        {"cosmetic", "/particle", "[id] [v2]", "Spawn particle visual effect at coordinates", "`b", "particle vfx fx visual"},
-        {"cosmetic", "/hitvfx", "[id]", "Set custom punch hit visual effect", "`b", "hitvfx punch hit strike"},
-        {"cosmetic", "/banner", "[id]", "Set custom guild banner / bandolier effect", "`b", "banner bandolier guild flag"},
-        {"cosmetic", "/paintball", "[col]", "Set paintball splatter color hex", "`b", "paintball paint splat color"},
-        {"cosmetic", "/levelup", "[lvl]", "Trigger visual level-up animation & fireworks", "`b", "levelup level fireworks celebration"},
-        {"cosmetic", "/rainbow", "", "Toggle cycling rainbow clothes and skin colors", "`b", "rainbow cycle rgb colors"},
-        {"cosmetic", "/dragon", "", "Toggle daylight dragon visual aura", "`b", "dragon aura daylight effect"},
-        {"cosmetic", "/riftwings", "", "Toggle rift wings & cape visual aura", "`b", "riftwings rift cape wings aura"},
-        {"cosmetic", "/infinity", "[type]", "Toggle infinity aura effect", "`b", "infinity aura effect"},
-        {"cosmetic", "/ghost", "", "Toggle ghost character visual mode", "`b", "ghost transparent invis char"},
+        // --- 3. Auto Hoster ---
+        {"casino", "/tp", "", "(Starts Autohoster Bet Sweep [Don't Move])"},
+        {"casino", "/win1, /win2", "", "(Drops Prize To Pos1-2 & Returns To Host Spot)"},
+        {"casino", "/game", "[bet]", "(Set Game Bet Count & Calculate Tax)"},
+        {"casino", "/gdrop", "", "(Drop Prize To Winner With Tax Deduction)"},
+        {"casino", "/settax", "[%]", "(Set Tax Percentage e.g. 5 = 5%)"},
+        {"casino", "/pos1, /pos2, /pos3, /pos4", "", "(Set Pos1-4 For Autohost To Teleport)"},
+        {"casino", "/posback", "", "(Set Return Position After Drop/Host)"},
+        {"casino", "/spos1, /spos2", "", "(Punch Tile To Set Pos1-2 For Autohost)"},
+        {"casino", "/cpos1, /cpos2", "", "(Highlight & Check Saved Pos1-2)"},
+        {"casino", "/tp1, /tp2, /tp3, /tp4", "", "(Teleport/Pathfind To Saved Pos1-4)"},
+        {"casino", "/qq", "[on/off]", "(Toggle Show QQ Number in Roulette Spin)"},
+        {"casino", "/reme", "[on/off]", "(Toggle Show REME Spin in Roulette Spin)"},
+        {"casino", "/dpos", "", "(Set Target Drop Position Where You Stand)"},
+        {"casino", "/dropat", "[amt]", "(Teleport To Saved Drop Spot & Drop Prize)"},
 
-        // --- 4. World, Scanner & Navigation ---
-        {"world", "/warp", "[world]|[door]", "Warp directly to world and door ID", "`1", "warp world goto join door"},
-        {"world", "/back, /BACK", "", "Warp back to previously visited world", "`1", "back BACK previous world warp"},
-        {"world", "/relog", "", "Reconnect and relog into current world (quit_to_exit)", "`1", "relog reconnect restart world"},
-        {"world", "/save, /saveworld", "", "Warp to designated safe storage world", "`1", "save saveworld safe world warp"},
-        {"world", "/setsave", "[world]", "Set and save designated safe storage world to config", "`1", "setsave save safe world config"},
-        {"world", "/fastdoor", "", "Toggle fast open/close entrance doors (auto-public)", "`1", "fastdoor door public open close gateway"},
-        {"world", "/exit", "", "Exit world to main menu", "`1", "exit leave unjoin"},
-        {"world", "/growscan, /gs", "", "Scan floating items, blocks & trees in world", "`1", "growscan gs scan floating items world"},
-        {"world", "/gsbeta", "", "Beta world scanner with item totals", "`1", "gsbeta scan beta totals"},
-        {"world", "/find, /search", "[item]", "Search for specific item located in world", "`1", "find search locate item world"},
-        {"world", "/lockefind", "", "Scan world for Locke the Traveling Salesman", "`1", "lockefind locke salesman merchant"},
-        {"world", "/dat", "", "Inspect tile extra data (seeds, signs, locks)", "`1", "dat tile trees seeds sign data inspect"},
-        {"world", "/chest", "", "Inspect items placed inside chests in world", "`1", "chest box container inspect"},
-        {"world", "/inventory, /inv", "", "View complete inventory items list", "`1", "inventory inv items list"},
-        {"world", "/players", "", "List all players currently in world with NetIDs", "`1", "players list netid player who"},
-        {"world", "/door", "[door_id]", "Enter specific door by ID", "`1", "door enter id portal"},
-        {"world", "/doorid", "", "Scan and display all door IDs in world", "`1", "doorid scan door ids"},
-        {"world", "/doorbf", "", "Bruteforce locked door IDs", "`1", "doorbf brute bf password door"},
-        {"world", "/remo, /unaccess", "", "Fast unaccess from world locks", "`1", "remo unaccess remove lock wl hl"},
-        {"world", "/eventmenu", "", "Open clash event menu (even if not live)", "`1", "eventmenu clash event tournament"},
-        {"world", "/weather", "[id]", "Change client-side weather machine effect", "`1", "weather setweather atmosphere sky"},
-        {"world", "/initworld", "", "Send OnInitNewWorld refresh packet", "`1", "initworld refresh reload world"},
+        // --- 5. Economy & Drops ---
+        {"econ", "/dw", "<amount>", "(Drop World Locks Without Confirmation Dialog)"},
+        {"econ", "/cd, /cdrop", "<amount>", "(Custom Drop World Locks Exact Amount)"},
+        {"econ", "/dd, /ddrop", "<amount>", "(Drop Diamond Locks Amount)"},
+        {"econ", "/dbgl", "<amount>", "(Drop Blue Gem Locks Without Confirmation)"},
+        {"econ", "/dropbgl", "<amount>", "(Drop Specified Amount Of BGLs)"},
+        {"econ", "/daw", "", "(Drop All Locks: WLs, DLs & BGLs)"},
+        {"econ", "/dbglvis", "<amount>", "(Visual Drop Blue Gem Locks [No Loss])"},
+        {"econ", "/dropall", "[qty]", "(Drop Items From Inventory [All Or Quantity])"},
+        {"econ", "/balance", "", "(Shows Your Current World Lock Balance)"},
 
-        // --- 5. Admin, Moderation & Cheats ---
-        {"mod", "/admin", "", "Check online admin/mod UIDs and status", "`4", "admin mod check staff uid"},
-        {"mod", "/moddetect", "", "Toggle mod spawn detection & screen alert", "`4", "moddetect mod alert sound detect warn"},
-        {"mod", "/run", "", "Emergency escape: hops multiple worlds to evade mods", "`4", "run escape flee evade emergency"},
-        {"mod", "/immune", "", "Toggle collision & damage immunity", "`4", "immune god godmode collision spike lava"},
-        {"mod", "/antigravity", "", "Toggle zero-gravity floating mode", "`4", "antigravity gravity float fly"},
-        {"mod", "/antipunch", "", "Toggle punch jammer protection effect", "`4", "antipunch punch block shield jammer"},
-        {"mod", "/vision", "", "Toggle night vision (see clearly in dark worlds)", "`4", "vision nightvision see dark light"},
-        {"mod", "/invis", "", "Toggle player invisibility mode", "`4", "invis invisible vanish hide"},
-        {"mod", "/sm", "", "Super Supporter mode (rejoin for long punch)", "`4", "sm supersupporter longpunch mod"},
-        {"mod", "/mstate", "[1/0]", "Toggle mod state long punch immediately", "`4", "mstate longpunch modstate punch"},
-        {"mod", "/wrench", "", "Toggle auto-wrench mode (pull/kick/ban on tap)", "`4", "wrench autowrench pull kick ban fastwrench"},
-        {"mod", "/join", "", "Open join mode GUI (auto-kick/pull/ban on enter)", "`4", "join autokick autopull autoban"},
-        {"mod", "/banall", "", "Mass ban all non-access players in world", "`4", "banall massban ban all"},
-        {"mod", "/pullall", "", "Mass pull all players in world to your position", "`4", "pullall masspull pull all"},
-        {"mod", "/banfire", "", "Auto-ban player with special fire animation", "`4", "banfire ban fire effect"},
-        {"mod", "/freeze", "[netid]", "Freeze player client (fake disconnect)", "`4", "freeze fake dc lag drop netid"},
-        {"mod", "/warn", "[netid]", "Send warning popup dialog to player", "`4", "warn warning popup alert player"},
-        {"mod", "/mentor", "[netid]", "Set player mentor state badge", "`4", "mentor role badge helper"},
-        {"mod", "/fakemaint", "[msg]", "Display fake system maintenance popup", "`4", "fakemaint maintenance restart fake"},
+        // --- 6. Clothes & Visual Customization ---
+        {"visual", "/find", "[item name]", "(Find An Item So You Can Visually Add To Inventory)"},
+        {"visual", "/clothes", "", "(Visual Clothes Options & Wardrobe)"},
+        {"visual", "/flag", "[itemID]", "(Sets Flag To Item ID)"},
+        {"visual", "/titles", "", "(You Can Select Visual g4g, maxlevel, dr, mentor...)"},
+        {"visual", "/legend", "", "(Sets Your Name To Legendary Name)"},
+        {"visual", "/dr", "", "(Apply Dr. Title)"},
+        {"visual", "/mentor", "", "(Apply Mentor Title)"},
+        {"visual", "/maxlevel", "", "(Apply Max Level Title)"},
+        {"visual", "/g4g", "", "(Apply G4G Title)"},
+        {"visual", "/cleartitle", "", "(Remove All Titles And Reset Name)"},
+        {"visual", "/name", "[name]", "(Set Visual Name To Your Name)"},
+        {"visual", "/skin", "<r> <g> <b>", "(Set Visual Skin Color To Yourself)"},
+        {"visual", "/weather", "[id]", "(Custom Visual Weather Select)"},
+        {"visual", "/vision", "", "(Visually Replace Background Blocks To Glass Pane)"},
+        {"visual", "/invis", "", "(Visual Moderator Invis Mode)"},
+        {"visual", "/fakeban", "", "(Visually Get Perma-Ban Notification)"},
+        {"visual", "/warn", "", "(Warn Yourself With Any Text Notification)"},
+        {"visual", "/save1, /save2, /save3, /save4", "", "(Save Current Visual Clothes Set To Slot 1-4)"},
+        {"visual", "/load1, /load2, /load3, /load4", "", "(Load Saved Visual Clothes Set From Slot 1-4)"},
+        {"visual", "/set1, /set2, /set3, /set4", "", "(Shortcut To Equip Saved Set Slot 1-4)"},
+        {"visual", "/clearclothes", "", "(Clear All Saved Visual Clothing Items)"},
+        {"visual", "/rainbow", "", "(Toggle Rainbow Pure Being Mode)"},
+        {"visual", "/ghostchar", "", "(Toggle Ghost Character Mode)"},
+        {"visual", "/blink", "", "(Enable Rainbow Color-Cycle Blink Mode)"},
 
-        // --- 6. Automation & Utility ---
-        {"auto", "/spam", "", "Open Auto Spam settings dialog", "`3", "spam autospam chat dialog"},
-        {"auto", "//", "", "Toggle automated chat spammer ON/OFF", "`3", "spam toggle autospam chat loop"},
-        {"auto", "/spamdelay", "[ms]", "Set delay for automated chat spammer (ms)", "`3", "spamdelay delay interval spam"},
-        {"auto", "/autosurg", "", "Toggle automated surgery bot", "`3", "autosurg surgery bot hospital surg"},
-        {"auto", "/autocrime", "", "Toggle automated superhero crime solver", "`3", "autocrime crime bot superhero villain"},
-        {"auto", "/gui", "", "Toggle desktop ImGui overlay control window", "`3", "gui imgui menu window overlay"},
-        {"auto", "/ping", "", "Display real-time ping to Growtopia server", "`3", "ping latency ms server"},
-        {"auto", "/devicecheck", "", "Inspect spoofed MAC, RID, and hardware details", "`3", "devicecheck mac rid hardware spoof device"},
-        {"auto", "/broadcast", "[msg]", "Send visual broadcast announcement banner", "`3", "broadcast announcement banner fake"},
-        {"auto", "/bubble", "[text]", "Spawn custom chat bubble over head", "`3", "bubble talk chat text speech"},
-        {"auto", "/overlay", "[text]", "Display screen center text announcement", "`3", "overlay screen text display"},
-        {"auto", "/gems", "", "Open Gem Settings (collected count, show to others, instant drop, punch tile)", "`3", "gems gem settings options dialog collected instant punch"},
-        {"auto", "/cgems", "", "Show gem count on all tiles with dropped gems", "`3", "cgems count gems tiles ground display"},
-        {"auto", "/bux", "[amt]", "Set visual Growtokens count (server-validated)", "`3", "bux tokens visual count"},
-        {"auto", "/debuganim", "", "Animation packet debugger and copier", "`3", "debuganim animation debug packet copy"},
-        {"auto", "/rawvar", "[args]", "Send custom raw VarList packet", "`3", "rawvar varlist packet debug"},
-        {"auto", "/proxy, /news", "", "Open this comprehensive commands guide", "`3", "proxy commands help info guide menu news default"}
+        // --- 7. Information ---
+        {"information", "/growscan", "", "(Free Fully Functional Growscan For Items & Blocks)"},
+        {"information", "/chest", "", "(Shows Hidden Items In Chests)"},
+        {"information", "/gems", "", "(Shows Gems Amount On Tiles & Settings)"},
+        {"information", "/cgems", "", "(Show Gem Count On All Tiles With Gems)"},
+        {"information", "/dat", "[scan]", "(Show Tile Data, Floating Drops & Tile Scanner)"},
+        {"information", "/doordat", "", "(Scan World For Doors & Portal Destinations)"},
+        {"information", "/doorid", "", "(Toggle Door ID Reveal When Entering Doors)"},
+        {"information", "/admin", "", "(Scan World For Locks And Show Owner/Admin Data)"},
+        {"information", "/lockefind", "", "(Show Latest Worlds Where Locke Stopped By)"},
+        {"information", "/devicecheck", "", "(Show Tracked Spawned Players And Their Device Type)"},
+        {"information", "/players", "", "(List All Tracked Players With NetID And Tile Position)"},
+        {"information", "/inv", "[item_id]", "(Show Inventory Info & Item Counts)"},
+        {"information", "/showxy", "", "(Show Current X,Y Tile Coordinate Position)"},
+        {"information", "/uid", "", "(Display Current Player User ID)"},
+        {"information", "/scan", "", "(Toggle World Item Scan & Extract Mode)"},
+        {"information", "/track", "", "(Toggle Drop Tracker Log)"},
+        {"information", "/balance", "", "(Shows Your Current World Lock Balance)"},
+
+        // --- 8. Shortcuts ---
+        {"sc", "/antigravity", "", "(Toggle Unlimited Jumping & Zero Gravity)"},
+        {"sc", "/antipunch", "", "(Activate Anti-Punch Visual Jammer)"},
+        {"sc", "/immune", "", "(Toggle Immunity To Fire, Lava & Spike Hazards)"},
+        {"sc", "/moddetect", "", "(Toggle Moderator Spawn Detection & Alert)"},
+        {"sc", "/back", "", "(Warps You To A Previously Visited World)"},
+        {"sc", "/save", "", "(Warps You To A Save World)"},
+        {"sc", "/setsave", "[world]", "(Set Save World)"},
+        {"sc", "/relog", "", "(Fast Exit & Join Back To The World)"},
+        {"sc", "/run", "", "(Panic Moderator Escape: Hops 12 Random Worlds)"},
+        {"sc", "/warp", "<world>", "(Warp Directly Into Specified World)"},
+        {"sc", "/vendlogs", "", "(Opens Up A Page With Proxy Saved Logs)"},
+        {"sc", "/vendf", "[item]", "(Search For Items In Vending Machines Across Worlds)"},
+        {"sc", "/vendtp", "<item>", "(Highlight Matching Vends In Current World)"},
+        {"sc", "/vendsafe", "", "(Toggle Safe Vending Buy Anti-Scam Protection)"},
+        {"sc", "/door", "<door_id>", "(Join Specific Door ID In Current World)"},
+        {"sc", "/fastdoor", "", "(Toggle Fast Open/Close Entrance Doors)"},
+        {"sc", "/path", "<x> <y>", "(Walk To Coordinates Using Smart A* Pathfinding)"},
+        {"sc", "/player", "<name>", "(Teleport And Pathfind To Player By Name)"},
+        {"sc", "/setpos", "<x> <y>", "(Teleport Character To Position Coordinates)"},
+        {"sc", "/pf", "", "(Toggle Click-To-Walk Pathfinder Mode ON/OFF)"},
+        {"sc", "/rema", "", "(Remove Your Access From All Locks In World)"},
+        {"sc", "/tf", "", "(Enables Fast Trash/Recycle Auto-Confirm)"},
+
+        // --- 9. Other Features ---
+        {"of", "/bankadd", "[amt]", "(Deposit World Locks From Inventory To Storage)"},
+        {"of", "/bankwith", "[amt]", "(Withdraw World Locks From Bank Storage)"},
+        {"of", "/bankcheck", "", "(Check Stored World Lock Bank Balance)"},
+        {"of", "/wlbank", "<amount>", "(Modify World Lock Storage Amount)"},
+        {"of", "/dbox", "", "(Auto-Donate Items To Donation Box In World)"},
+        {"of", "/fillgbc", "", "(Auto-Fill Well of Love With Golden Booty Chests)"},
+        {"of", "/doorbf", "", "(Bruteforce Hidden Door Passwords & IDs)"},
+        {"of", "/bid", "<amount>", "(Place World Auction Bid With Specified Amount)"},
+        {"of", "/mailclaim", "", "(Claim Mail Reward By Message ID)"},
+        {"of", "/ignorecsn", "", "(Toggle Auto-Ignore For CSN/REME Seller Spam)"},
+        {"of", "/ignorecsnchat", "", "(Toggle Auto-Ignore For CSN Casino Chat Spam)"},
+        {"of", "/fakemaint", "<reason>", "(Send Fake Maintenance System Message Dialog)"},
+        {"of", "/broadcast", "<text>", "(Inject Simulated Local Super-Broadcast SB)"},
+        {"of", "/rawvar", "<name> [args]", "(Send Arbitrary Serialized VarList Packet)"},
+        {"of", "/cmsg", "<text>", "(Send Console Message With Color Code Support)"},
+        {"of", "/dialog", "<text>", "(Test Custom Raw Dialog Box Syntax)"},
+        {"of", "/overlay", "<text>", "(Display On-Screen Text Overlay Banner)"},
+        {"of", "/mstate", "", "(Toggle Mod State: Long Punch, Zoom & Reach)"},
+        {"of", "/sm", "", "(Toggle SuperMod Visual State & Badge)"},
+        {"of", "/betatest", "", "(Toggle Beta Tester Mode Interface Flags)"},
+        {"of", "/freeze", "[netid]", "(Simulate Freeze Status On Yourself Or Player)"},
+        {"of", "/hitvfx", "<id>", "(Trigger Hit Visual Impact Particle Effects 1-100)"},
+        {"of", "/trade", "<start|end>", "(Send Trade Session Control Packets)"},
+        {"of", "/action", "<type>", "(Trigger Generic Game Action Packets)"},
+        {"of", "/spawnbgls", "", "(Spawn Visual Blue Gem Locks Across World)"},
+        {"of", "/initworld", "", "(Reinitialize World State With OnInitNewWorld)"},
+        {"of", "/bux", "<tokens>", "(Update Client Growtokens Display With OnSetBux)"},
+        {"of", "/debuganim", "", "(Debug Real vs Visual Equipped Punch Animations)"},
+        {"of", "/event", "<name>", "(Simulate Holiday Event: Valentines, Easter, Halloween)"}
     };
     return s_commands;
 }
@@ -267,11 +307,11 @@ void ProxyCommand::execute(client::Client* client, const std::vector<std::string
 
 static std::vector<std::string> get_categories_for_tab(int tab) {
     switch (tab) {
-        case 0: return {"casino", "move", "econ", "cosmetic", "world", "mod", "auto"}; // Tab 0: VinProxy Complete All Commands
-        case 1: return {}; // Tab 1: Main Features (Header only / testing)
-        case 2: return {}; // Tab 2: Proxy Logs (Header only / testing)
-        case 3: return {}; // Tab 3: Hidden Mods (Header only / testing)
-        case 4: return {}; // Tab 4: Options (Header only / testing)
+        case 0: return {"info", "customize", "mf", "casino", "econ", "visual", "information", "sc", "of"}; // Tab 0: All Commands
+        case 1: return {}; // Tab 1: Main Features (reserved)
+        case 2: return {}; // Tab 2: Proxy Logs (reserved)
+        case 3: return {}; // Tab 3: Hidden Mods (reserved)
+        case 4: return {}; // Tab 4: Options (reserved)
         default: return {};
     }
 }
@@ -350,7 +390,7 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, c
 
         // Tab Header Title
         if (active_tab == 0) {
-            dialog << "add_label_with_icon|big|`wVinProxy: `2Overview & Quick Navigation``|left|7188|\n";
+            dialog << "add_label_with_icon|big|`2VinProxy Premium Gazette``|left|7188|\n";
         } else if (active_tab == 1) {
             dialog << "add_label_with_icon|big|`wVinProxy: `3Main Features & Gameplay``|left|5956|\n";
         } else if (active_tab == 2) {
@@ -364,41 +404,18 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, c
 
         // Tab Subheader & Description
         if (active_tab == 0) {
-            dialog << "add_smalltext|`2[VINPROXY] `wWelcome to VinProxy Premium! Real-time high performance packet engine``|\n";
-            dialog << "add_smalltext|`w* Navigation: `oClick the tabs above to explore all features, logs, mods, and options``|\n";
-            dialog << "add_smalltext|`w* Desktop Overlay: `2/gui `o- Toggle floating ImGui desktop window with real-time controls``|\n";
-            dialog << "add_smalltext|`w* Network Latency: `2/ping `o- View real-time packet roundtrip latency to server``|\n";
-            dialog << "add_smalltext|`w* Hardware Spoof: `2/devicecheck `o- Inspect spoofed MAC and hardware identifiers``|\n";
-            dialog << "add_smalltext|`w* Quick Relog: `2/relog `o- Rejoin current world without closing game client``|\n";
+            // dialog << "add_label_with_icon|big|`2All Commands:``|left|5956|\n";
         } else if (active_tab == 1) {
-            dialog << "add_smalltext|`3[MAIN FEATURES] `wMovement, Pathfinding, World Scanner, Casino & Economy``|\n";
-            dialog << "add_smalltext|`w* Checkpoints: `3/pos1-4`o, teleport `3/tp1-4`o, smart pathfinder `3/pf`o / `3/path [x] [y]`o``|\n";
-            dialog << "add_smalltext|`w* CSN Casino: `6/pos1`o & `6/pos2`o drop bets, `6/w1`o & `6/w2`o auto-payout, `6/host`o calculator``|\n";
-            dialog << "add_smalltext|`w* Economy & Drops: `e/fd`o fast drop, `e/autocollect`o, `e/dw`o & `e/dd`o quick drop locks``|\n";
-            dialog << "add_smalltext|`w* World Utilities: `1/warp [world]`o, `1/growscan`o floating items, `1/chest`o inspect``|\n";
+            // dialog << "add_smalltext|`3[MAIN FEATURES] `wMovement, Pathfinding, World Scanner, Casino & Economy``|\n";
         } else if (active_tab == 2) {
-            dialog << "add_smalltext|`e[PROXY LOGS] `wReal-time Packet Streams, Activity Records & Transaction Logs``|\n";
-            dialog << "add_smalltext|`w* Live Console: `oPacket events and chat are logged in real-time to your console window``|\n";
-            dialog << "add_smalltext|`w* File Logging: `oSession transcripts are saved to `9build/src/proxy.log``|\n";
-            dialog << "add_smalltext|`w* Vending History: `e/vendlogs `o- View transaction records for vending machines``|\n";
-            dialog << "add_smalltext|`w* Packet Debugging: `e/rawvar `o- Send custom VarList packets for testing``|\n";
-            dialog << "add_smalltext|`w* Animation Monitor: `e/debuganim `o- Copy and inspect animation packets``|\n";
+            // dialog << "add_smalltext|`e[PROXY LOGS] `wReal-time Packet Streams, Activity Records & Transaction Logs``|\n";
         } else if (active_tab == 3) {
-            dialog << "add_smalltext|`4[HIDDEN MODS] `wStaff Detection, Godmode Immunity & World Moderation Cheats``|\n";
-            dialog << "add_smalltext|`w* Staff Detection: `4/moddetect `o- Instant screen alert and sound when mod joins``|\n";
-            dialog << "add_smalltext|`w* Emergency Escape: `4/run `o- Instantly hops multiple worlds to evade moderators``|\n";
-            dialog << "add_smalltext|`w* Godmode Immunity: `4/immune `o- Disable collision damage from spikes & lava``|\n";
-            dialog << "add_smalltext|`w* Invisibility & Ghost: `4/invis `o- Hide character sprite, `4/antigravity `o- Zero-gravity``|\n";
-            dialog << "add_smalltext|`w* Mass Moderation: `4/wrench `o- Tap to pull/kick, `4/banall `o- Mass ban non-access``|\n";
+            // dialog << "add_smalltext|`4[HIDDEN MODS] `wStaff Detection, Godmode Immunity & World Moderation Cheats``|\n";
         } else {
-            dialog << "add_smalltext|`6[OPTIONS] `wProxy Settings, Auto-Spam, Automation Timers & Client Toggles``|\n";
-            dialog << "add_smalltext|`w* Auto Spammer: `oToggle with `6//`o, set delay with `6/spamdelay [ms]`o, GUI: `6/spam`o``|\n";
-            dialog << "add_smalltext|`w* Bots: `oToggle surgery bot with `6/autosurg`o, crime solver with `6/autocrime`o``|\n";
-            dialog << "add_smalltext|`w* Casino Filter: `oMute CSN broadcasts with `6/ignorecsn`o & chat with `6/ignorecsnchat`o``|\n";
-            dialog << "add_smalltext|`w* Visual Cosmetics: `b/clothes`o selector, `b/skin [hex]`o, `b/name`o, `b/rainbow`o``|\n";
+            // dialog << "add_smalltext|`6[OPTIONS] `wProxy Settings, Auto-Spam, Automation Timers & Client Toggles``|\n";
         }
-        dialog << "add_smalltext|`#════════════════════════════════════════════════════════════════════════════════════════════``|\n";
-        dialog << "add_spacer|small|\n";
+
+        // dialog << "add_spacer|small|\n";
 
         // Reserved / Testing area for Tabs 1-4 (user will customize these later)
         if (active_tab != 0 && filter_lower.empty()) {
@@ -431,8 +448,9 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, c
             dialog << "add_spacer|small|\n";
 
             for (const auto* c : cat_cmds) {
+                std::string cmd_color = c->color.empty() ? "`2" : c->color;
                 std::string arg_str = c->args.empty() ? "" : (" `9" + c->args);
-                std::string line = fmt::format("{}{}{} `o- {}``", c->color, c->cmd, arg_str, c->desc);
+                std::string line = fmt::format("{}{}{} `9{}``", cmd_color, c->cmd, arg_str, c->desc);
                 dialog << "add_smalltext|" << line << "|\n";
             }
         }
