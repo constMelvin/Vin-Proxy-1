@@ -70,11 +70,24 @@ private:
                 uint16_t item_id = static_cast<uint16_t>(tank->int_data);
                 if (item_id != 18 && item_id != 0) {
                     handle_tile_change(tank);
+                } else if (item_id == 18 && event.from == core::EventFrom::FromServer) {
+                    // Server-sent punch tile change = the block was broken / tree harvested
+                    // (LuckyProxy events::in::onTileChangeRequest). Client-sent punches are
+                    // only requests and must not clear anything.
+                    handle_tile_break(tank);
                 }
             }
         }
 
         if (event.from != core::EventFrom::FromServer) return;
+
+        // Tree harvested: the server reports it with SEND_TILE_TREE_STATE and item -1
+        // (LuckyProxy server.cpp PACKET_SEND_TILE_TREE_STATE). Without this the tree
+        // stays in the world model and auto harvest keeps punching the empty tile.
+        if (tank && game_packet.type == packet::PACKET_SEND_TILE_TREE_STATE && tank->target_net_id == -1) {
+            utils::WorldManager::get_instance().clear_tile_fg(tank->int_x, tank->int_y);
+            spdlog::info("Tree harvested at tile=({},{})", tank->int_x, tank->int_y);
+        }
 
         // ─── Periodic gem updates (driven by server packets) ─────────
         {
@@ -125,6 +138,13 @@ private:
         );
 
 
+    }
+
+    void handle_tile_break(const packet::TankUpdatePacket* tank) {
+        int32_t tx = (tank->int_x >= 0) ? tank->int_x : static_cast<int32_t>(tank->vec_x / 32.0f);
+        int32_t ty = (tank->int_y >= 0) ? tank->int_y : static_cast<int32_t>(tank->vec_y / 32.0f);
+        utils::WorldManager::get_instance().clear_tile(tx, ty);
+        spdlog::debug("Tile broken at tile=({},{})", tx, ty);
     }
 
     void handle_tile_change(const packet::TankUpdatePacket* tank) {

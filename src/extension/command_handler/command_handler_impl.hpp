@@ -26,6 +26,10 @@
 #include "dropall_command.hpp"
 #include "autocomp_command.hpp"
 #include "autocollect_command.hpp"
+#include "autoharvest_command.hpp"
+#include "autoplant_command.hpp"
+#include "autofarm_command.hpp"
+#include "autofish_command.hpp"
 #include "dropfast_command.hpp"
 #include "drop_currency_command.hpp"
 #include "trashfast_command.hpp"
@@ -127,6 +131,10 @@ public:
         command::DropAllCommand::set_core(core_);
         command::AutoCompCommand::set_core(core_);
         command::AutoCollectCommand::set_core(core_);
+        command::AutoHarvestCommand::set_core(core_);
+        command::AutoPlantCommand::set_core(core_);
+        command::AutoFarmCommand::set_core(core_);
+        command::AutoFishCommand::set_core(core_);
         command::BuyCommand::set_core(core_);
         command::FillGBCCommand::set_core(core_);
         command::DboxCommand::set_core(core_);
@@ -246,6 +254,14 @@ public:
         register_command(std::make_unique<command::DropAllCommand>());
         register_command(std::make_unique<command::AutoCompCommand>());
         register_command(std::make_unique<command::AutoCollectCommand>());
+        register_command(std::make_unique<command::AutoHarvestCommand>());
+        register_command(std::make_unique<command::HarvestToggleCommand>());
+        register_command(std::make_unique<command::AutoPlantCommand>());
+        register_command(std::make_unique<command::PlantToggleCommand>());
+        register_command(std::make_unique<command::AutoFarmCommand>());
+        register_command(std::make_unique<command::FarmToggleCommand>());
+        register_command(std::make_unique<command::AutoFishCommand>());
+        register_command(std::make_unique<command::FishToggleCommand>());
         register_command(std::make_unique<command::DropFastCommand>());
         register_command(std::make_unique<command::DropWLCommand>());
         register_command(std::make_unique<command::DropDLCommand>());
@@ -382,8 +398,6 @@ public:
         command::CollectCommand::set_core(core_);
         command::CountryListCommand::set_core(core_);
         command::WorldOptionsCommand::set_core(core_);
-        command::AutoFishCommand::set_core(core_);
-        command::AutoFarmCommand::set_core(core_);
         command::HotkeysCommand::set_core(core_);
         command::OptionsPageCommand::set_core(core_);
         command::DropBGLAliasCommand::set_core(core_);
@@ -407,8 +421,6 @@ public:
         register_command(std::make_unique<command::CollectCommand>());
         register_command(std::make_unique<command::CountryListCommand>());
         register_command(std::make_unique<command::WorldOptionsCommand>());
-        register_command(std::make_unique<command::AutoFishCommand>());
-        register_command(std::make_unique<command::AutoFarmCommand>());
         register_command(std::make_unique<command::HotkeysCommand>());
         register_command(std::make_unique<command::OptionsPageCommand>());
         register_command(std::make_unique<command::DropBGLAliasCommand>());
@@ -757,6 +769,42 @@ private:
             }
             else if (dialog_name == "pathfind_gui" || dialog_name == "pf_options") {
                 command::FindPathCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), button_clicked, event.get_message().get_raw());
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "speed_page") {
+                if (button_clicked != "Cancel")
+                    command::SpeedCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), event.get_message().get_raw());
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "auto_collect_page") {
+                if (button_clicked != "Cancel")
+                    command::AutoCollectCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), event.get_message().get_raw());
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "auto_harvest_page") {
+                if (button_clicked != "Cancel")
+                    command::AutoHarvestCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), event.get_message().get_raw());
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "auto_plant_page") {
+                if (button_clicked != "Cancel")
+                    command::AutoPlantCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), event.get_message().get_raw());
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "farmpage") {
+                if (button_clicked != "Cancel")
+                    command::AutoFarmCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), event.get_message().get_raw());
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "autofish_page") {
+                if (button_clicked != "Cancel")
+                    command::AutoFishCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), event.get_message().get_raw());
                 event.canceled = true;
                 return;
             }

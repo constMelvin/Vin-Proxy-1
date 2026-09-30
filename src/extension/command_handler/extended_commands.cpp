@@ -1,4 +1,5 @@
 #include "extended_commands.hpp"
+#include "autocollect_command.hpp"
 #include "../../client/client.hpp"
 #include "../../player/player.hpp"
 #include "../../server/server.hpp"
@@ -7,6 +8,8 @@
 #include "../../packet/packet_variant.hpp"
 #include "../../packet/packet_types.hpp"
 #include "../../utils/byte_stream.hpp"
+#include "../../utils/text_parse.hpp"
+#include <cstring>
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
 #include <sstream>
@@ -307,47 +310,99 @@ void FastVendToggleCommand::execute(client::Client* client, const std::vector<st
 // SpeedCommand
 // ============================================================
 core::Core* SpeedCommand::s_core = nullptr;
-int SpeedCommand::s_speed = 1;
+float SpeedCommand::s_speed = SpeedCommand::DEFAULT_SPEED;
+float SpeedCommand::s_gravity = SpeedCommand::DEFAULT_GRAVITY;
 
-SpeedCommand::SpeedCommand() : CommandBase({"speed"}, {"[1-5]"}, "Set movement speed multiplier", 0) {}
+SpeedCommand::SpeedCommand() : CommandBase({"speed"}, {"[speed] [gravity]"}, "Open speed/gravity settings", 0) {}
 std::unique_ptr<CommandBase> SpeedCommand::clone() const { return std::make_unique<SpeedCommand>(*this); }
 void SpeedCommand::set_core(core::Core* core) { s_core = core; }
-int SpeedCommand::get_speed() { return s_speed; }
+float SpeedCommand::get_speed() { return s_speed; }
+float SpeedCommand::get_gravity() { return s_gravity; }
+bool SpeedCommand::is_custom() { return s_speed != DEFAULT_SPEED || s_gravity != DEFAULT_GRAVITY; }
+
+// LuckyProxy events.cpp /speed: "Speed Settings" dialog with Speed + Gravity inputs
+void SpeedCommand::show_dialog(player::Player* player) {
+    std::ostringstream dlg;
+    dlg << "add_label_with_icon|big|Speed Settings|left|2324|\n";
+    dlg << "add_text_input|speed_x|`9Speed:|" << s_speed << "|7|\n";
+    dlg << "add_text_input|speed_y|`9Gravity:|" << s_gravity << "|7|\n";
+    dlg << "end_dialog|speed_page|Cancel|Okey|\n";
+    send_dialog(player, dlg.str());
+}
+
+// LuckyProxy server::sendState: PACKET_SET_CHARACTER_STATE to the local client
+void SpeedCommand::send_state(player::Player* player) {
+    if (!player) return;
+    auto local = utils::PlayerTracker::get_instance().get_local_player();
+    if (local.netID <= 0) return;
+
+    uint8_t data[56];
+    memset(data, 0, sizeof(data));
+
+    int type = static_cast<int>(packet::PACKET_SET_CHARACTER_STATE);
+    int32_t nid = static_cast<int32_t>(local.netID);
+    int state = (1 << 1) | (1 << 24);   // double jump + super supporter (as LuckyProxy)
+    float x = 1000.0f, y = 400.0f;
+    float waterspeed = 200.0f;
+    memcpy(data + 0, &type, 4);
+    memcpy(data + 4, &nid, 4);
+    memcpy(data + 16, &waterspeed, 4);
+    memcpy(data + 20, &state, 4);
+    memcpy(data + 24, &x, 4);
+    memcpy(data + 28, &y, 4);
+    memcpy(data + 32, &s_speed, 4);     // vec_x2 = move speed
+    memcpy(data + 36, &s_gravity, 4);   // vec_y2 = gravity
+    data[2] = 128;                      // build range
+    data[3] = 128;                      // punch range
+
+    ByteStream<std::uint16_t> bs{};
+    bs.write(packet::NET_MESSAGE_GAME_PACKET);
+    bs.write_data(reinterpret_cast<const std::byte*>(data), sizeof(data));
+    (void)player->send_packet(bs.get_data(), 0);
+}
+
+// LuckyProxy apply_speed_value: read speed_x / speed_y from dialog_return, then sendState
+void SpeedCommand::handle_dialog_response(player::Player* player, const std::string& raw) {
+    TextParse tp{raw};
+    auto apply = [&](const char* key, float& target) {
+        std::string val = tp.get(key);
+        if (val.empty()) return;
+        try {
+            float f = std::stof(val);
+            if (f > 0.0f) target = f;   // 0 / negative would freeze or break movement
+        } catch (...) {}
+    };
+    apply("speed_x", s_speed);
+    apply("speed_y", s_gravity);
+    send_state(player);
+    if (player)
+        utils::PacketUtils::send_chat_message(player, fmt::format("`9Speed: `2{} `9Gravity: `2{}", s_speed, s_gravity));
+    spdlog::info("SpeedCommand: speed={} gravity={}", s_speed, s_gravity);
+}
 
 void SpeedCommand::execute(client::Client* client, const std::vector<std::string>& args) {
     auto* player = resolve_player(s_core, client);
     if (!player) return;
 
     if (args.size() < 2) {
-        // Show speed selection dialog
-        std::ostringstream dlg;
-        dlg << "set_default_color|`o\n";
-        dlg << "add_label_with_icon|big|`2Speed Selection``|left|2246|\n";
-        dlg << "add_spacer|small|\n";
-        dlg << fmt::format("add_textbox|`9Current Speed: `2{}x``|left|\n", s_speed);
-        dlg << "add_spacer|small|\n";
-        dlg << "add_button|speed_1|`91x Speed (Normal)``|noflags|0|0|\n";
-        dlg << "add_button|speed_2|`92x Speed``|noflags|0|0|\n";
-        dlg << "add_button|speed_3|`93x Speed``|noflags|0|0|\n";
-        dlg << "add_button|speed_4|`94x Speed``|noflags|0|0|\n";
-        dlg << "add_button|speed_5|`25x Speed (Max)``|noflags|0|0|\n";
-        dlg << "end_dialog|speed_dialog|Cancel||\n";
-        dlg << "add_quick_exit|\n";
-        send_dialog(player, dlg.str());
+        show_dialog(player);
         return;
     }
 
+    // Optional shortcut: /speed <speed> [gravity]
     try {
-        int spd = std::stoi(args[1]);
-        if (spd < 1 || spd > 5) {
-            utils::PacketUtils::send_chat_message(player, "`4Invalid speed. Use 1-5.");
+        float spd = std::stof(args[1]);
+        float grav = args.size() > 2 ? std::stof(args[2]) : s_gravity;
+        if (spd <= 0.0f || grav <= 0.0f) {
+            utils::PacketUtils::send_chat_message(player, "`4Speed and gravity must be greater than 0.");
             return;
         }
         s_speed = spd;
-        utils::PacketUtils::send_chat_message(player, fmt::format("`9Speed set to `2{}x", s_speed));
-        spdlog::info("SpeedCommand: speed set to {}x", s_speed);
+        s_gravity = grav;
+        send_state(player);
+        utils::PacketUtils::send_chat_message(player, fmt::format("`9Speed: `2{} `9Gravity: `2{}", s_speed, s_gravity));
     } catch (...) {
-        utils::PacketUtils::send_chat_message(player, "`4Usage: /speed [1-5]");
+        utils::PacketUtils::send_chat_message(player, "`4Usage: /speed [speed] [gravity]");
     }
 }
 
@@ -458,17 +513,17 @@ void GDropCommand::execute(client::Client* client, const std::vector<std::string
 // ============================================================
 core::Core* CollectCommand::s_core = nullptr;
 
-CollectCommand::CollectCommand() : CommandBase({"collect"}, {}, "Collect floating items within 10 tiles", 0) {}
+CollectCommand::CollectCommand() : CommandBase({"collect"}, {}, "Open the auto collect page (enable/disable + range)", 0) {}
 std::unique_ptr<CommandBase> CollectCommand::clone() const { return std::make_unique<CollectCommand>(*this); }
 void CollectCommand::set_core(core::Core* core) { s_core = core; }
 
+// /collect opens the Auto Collect page (enable/disable + editable range)
 void CollectCommand::execute(client::Client* client, const std::vector<std::string>&) {
     auto* player = resolve_player(s_core, client);
     if (!player) return;
 
-    utils::PacketUtils::send_chat_message(player,
-        "`2Collect `9triggered - picking up floating items within 10 tiles...");
-    spdlog::info("CollectCommand: triggered collect");
+    AutoCollectCommand::show_dialog(player);
+    spdlog::info("CollectCommand: auto collect dialog sent");
 }
 
 // ============================================================
@@ -548,73 +603,6 @@ void WorldOptionsCommand::execute(client::Client* client, const std::vector<std:
     dlg << "end_dialog|world_opts_dlg|Cancel||\n";
     send_dialog(player, dlg.str());
     spdlog::info("WorldOptionsCommand: dialog sent");
-}
-
-// ============================================================
-// AutoFishCommand
-// ============================================================
-core::Core* AutoFishCommand::s_core = nullptr;
-bool AutoFishCommand::s_enabled = false;
-
-AutoFishCommand::AutoFishCommand() : CommandBase({"afish", "autofish"}, {}, "Auto fish bot settings", 0) {}
-std::unique_ptr<CommandBase> AutoFishCommand::clone() const { return std::make_unique<AutoFishCommand>(*this); }
-void AutoFishCommand::set_core(core::Core* core) { s_core = core; }
-bool AutoFishCommand::is_enabled() { return s_enabled; }
-
-void AutoFishCommand::execute(client::Client* client, const std::vector<std::string>&) {
-    auto* player = resolve_player(s_core, client);
-    if (!player) return;
-
-    std::ostringstream dlg;
-    dlg << "set_default_color|`o\n";
-    dlg << "add_label_with_icon|big|`9Auto Fish Options``|left|3436|\n";
-    dlg << "add_spacer|small|\n";
-    dlg << fmt::format("add_textbox|`9Status: {}`9|left|\n", s_enabled ? "`2ACTIVE" : "`4INACTIVE");
-    dlg << "add_spacer|small|\n";
-    dlg << "add_textbox|`9To start fishing: Type `2/fish `9then press bait on water|left|\n";
-    dlg << "add_spacer|small|\n";
-    dlg << fmt::format("add_button|afish_toggle|{}``|noflags|0|0|\n",
-        s_enabled ? "`4Disable Auto Fish" : "`2Enable Auto Fish");
-    dlg << "add_spacer|small|\n";
-    dlg << "add_smalltext|`7Type /fish again to disable while active|left|\n";
-    dlg << "add_quick_exit|\n";
-    dlg << "end_dialog|afish_dlg|Close||\n";
-    send_dialog(player, dlg.str());
-    spdlog::info("AutoFishCommand: dialog sent (enabled={})", s_enabled);
-}
-
-// ============================================================
-// AutoFarmCommand
-// ============================================================
-core::Core* AutoFarmCommand::s_core = nullptr;
-bool AutoFarmCommand::s_enabled = false;
-
-AutoFarmCommand::AutoFarmCommand() : CommandBase({"afarm", "autofarm"}, {}, "Auto farm bot settings", 0) {}
-std::unique_ptr<CommandBase> AutoFarmCommand::clone() const { return std::make_unique<AutoFarmCommand>(*this); }
-void AutoFarmCommand::set_core(core::Core* core) { s_core = core; }
-bool AutoFarmCommand::is_enabled() { return s_enabled; }
-
-void AutoFarmCommand::execute(client::Client* client, const std::vector<std::string>&) {
-    auto* player = resolve_player(s_core, client);
-    if (!player) return;
-
-    std::ostringstream dlg;
-    dlg << "set_default_color|`o\n";
-    dlg << "add_label_with_icon|big|`5Auto Farm``|left|898|\n";
-    dlg << "add_spacer|small|\n";
-    dlg << fmt::format("add_textbox|`9Status: {}`9|left|\n", s_enabled ? "`2ACTIVE" : "`4INACTIVE");
-    dlg << "add_spacer|small|\n";
-    dlg << "add_label_with_icon|small|`9Select Farmable Item:``|left|242|\n";
-    dlg << "add_button_with_icon|afarm_pick|`2Select From Inventory``|staticBlueFrame|242|\n";
-    dlg << "add_spacer|small|\n";
-    dlg << fmt::format("add_button|afarm_toggle|{}``|noflags|0|0|\n",
-        s_enabled ? "`4Stop Auto Farm" : "`2Start Auto Farm");
-    dlg << "add_spacer|small|\n";
-    dlg << "add_textbox|`9Tip: Auto disables if you get pulled|left|\n";
-    dlg << "add_quick_exit|\n";
-    dlg << "end_dialog|afarm_dlg|Close||\n";
-    send_dialog(player, dlg.str());
-    spdlog::info("AutoFarmCommand: dialog sent (enabled={})", s_enabled);
 }
 
 // ============================================================

@@ -183,18 +183,30 @@ private:
 };
 
 // =============================================
-// SpeedCommand - Set Movement Speed Multiplier
+// SpeedCommand - Movement Speed / Gravity (LuckyProxy /speed)
 // =============================================
 class SpeedCommand : public CommandBase {
 public:
+    static constexpr float DEFAULT_SPEED = 250.0f;
+    static constexpr float DEFAULT_GRAVITY = 1000.0f;
+
     SpeedCommand();
     std::unique_ptr<CommandBase> clone() const override;
     void execute(client::Client* client, const std::vector<std::string>& args) override;
     static void set_core(core::Core* core);
-    static int get_speed();
+    static float get_speed();
+    static float get_gravity();
+    // True once the user changed speed/gravity away from the defaults
+    static bool is_custom();
+    // Handles the "speed_page" dialog_return (raw = full dialog_return text)
+    static void handle_dialog_response(player::Player* player, const std::string& raw);
+    // Sends PACKET_SET_CHARACTER_STATE with the current speed/gravity to the local client
+    static void send_state(player::Player* player);
 private:
+    static void show_dialog(player::Player* player);
     static core::Core* s_core;
-    static int s_speed;
+    static float s_speed;
+    static float s_gravity;
 };
 
 // =============================================
@@ -277,36 +289,6 @@ public:
     static void set_core(core::Core* core);
 private:
     static core::Core* s_core;
-};
-
-// =============================================
-// AutoFishCommand - Auto Fish Bot Settings
-// =============================================
-class AutoFishCommand : public CommandBase {
-public:
-    AutoFishCommand();
-    std::unique_ptr<CommandBase> clone() const override;
-    void execute(client::Client* client, const std::vector<std::string>& args) override;
-    static void set_core(core::Core* core);
-    static bool is_enabled();
-private:
-    static core::Core* s_core;
-    static bool s_enabled;
-};
-
-// =============================================
-// AutoFarmCommand - Auto Farm Bot Settings
-// =============================================
-class AutoFarmCommand : public CommandBase {
-public:
-    AutoFarmCommand();
-    std::unique_ptr<CommandBase> clone() const override;
-    void execute(client::Client* client, const std::vector<std::string>& args) override;
-    static void set_core(core::Core* core);
-    static bool is_enabled();
-private:
-    static core::Core* s_core;
-    static bool s_enabled;
 };
 
 // =============================================

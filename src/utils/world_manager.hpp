@@ -591,7 +591,43 @@ public:
     }
     
     
-    const std::vector<world::DroppedItemInfo>& get_items() const { 
+    // Server confirmed a break/harvest (tile change with item 18): empty the
+    // foreground, or the background if there is no foreground. Both the live
+    // tile list and the parsed world copy are cleared because get_tile_fg()
+    // falls back to the parsed copy whenever the live Fg reads 0.
+    void clear_tile(int32_t x, int32_t y) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (x < 0 || y < 0 || static_cast<uint32_t>(x) >= width_ || static_cast<uint32_t>(y) >= height_) {
+            return;
+        }
+        const size_t idx = static_cast<size_t>(y) * width_ + static_cast<size_t>(x);
+
+        uint16_t fg = 0;
+        if (idx < tiles_.size()) fg = tiles_[idx].Fg;
+        if (fg == 0 && idx < world_v2_copy_.tiles.size()) fg = world_v2_copy_.tiles[idx].fg;
+
+        if (fg != 0) {
+            if (idx < tiles_.size()) tiles_[idx].Fg = 0;
+            if (idx < world_v2_copy_.tiles.size()) world_v2_copy_.tiles[idx].fg = 0;
+        } else {
+            if (idx < tiles_.size()) tiles_[idx].Bg = 0;
+            if (idx < world_v2_copy_.tiles.size()) world_v2_copy_.tiles[idx].bg = 0;
+        }
+    }
+
+    // Tree harvested (PACKET_SEND_TILE_TREE_STATE with item -1): empty only the
+    // foreground, in both the live tile list and the parsed world copy.
+    void clear_tile_fg(int32_t x, int32_t y) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (x < 0 || y < 0 || static_cast<uint32_t>(x) >= width_ || static_cast<uint32_t>(y) >= height_) {
+            return;
+        }
+        const size_t idx = static_cast<size_t>(y) * width_ + static_cast<size_t>(x);
+        if (idx < tiles_.size()) tiles_[idx].Fg = 0;
+        if (idx < world_v2_copy_.tiles.size()) world_v2_copy_.tiles[idx].fg = 0;
+    }
+
+    const std::vector<world::DroppedItemInfo>& get_items() const {
         return items_; 
     }
     

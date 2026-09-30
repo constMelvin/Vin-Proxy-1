@@ -25,6 +25,7 @@
 #include "extension/autocrime/autocrime_extension.hpp"
 #include "extension/join_mode/join_mode_extension.hpp"
 #include "extension/world_logger_extension.hpp"
+#include "extension/autofarm/autofarm_extension.hpp"
 #include "extension/packet_interceptor_extension.hpp"
 #include "extension/lua_scripting_extension.hpp"
 #include "extension/player_state_tracker/player_state_tracker_impl.hpp"
@@ -588,6 +589,7 @@ int main() {
         core.add_extension(new extension::join_mode::JoinModeExtension{ &core });
         core.add_extension(new extension::packet_interceptor::PacketInterceptor{ &core });
         core.add_extension(new extension::world_logger::WorldLoggerExtension{ &core });
+        core.add_extension(new extension::autofarm::AutoFarmExtension{ &core });
         core.add_extension(new extension::lua_scripting::LuaScriptingExtension{ &core });
 
         spdlog::info("Extension loaded");

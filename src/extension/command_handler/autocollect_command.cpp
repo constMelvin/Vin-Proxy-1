@@ -1,5 +1,8 @@
 
 #include "autocollect_command.hpp"
+#include "autofarm_common.hpp"
+#include "../../utils/packet_utils.hpp"
+#include "../../utils/text_parse.hpp"
 #include "../../client/client.hpp"
 #include "../../server/server.hpp"
 #include "../../player/player.hpp"
@@ -10,6 +13,7 @@
 #include "../../utils/inventory_manager.hpp"
 #include <thread>
 #include <chrono>
+#include <sstream>
 #include <cmath>
 #include <mutex>
 #include <unordered_set>
@@ -24,25 +28,14 @@ namespace command {
 core::Core*              AutoCollectCommand::s_core     = nullptr;
 std::atomic<bool>        AutoCollectCommand::s_running  {false};
 std::atomic<uint64_t>    AutoCollectCommand::s_generation{0};
+std::atomic<int>         AutoCollectCommand::s_range_tiles{AutoCollectCommand::DEFAULT_RANGE_TILES};
 
 
 
+// Same "[VinProxy Premium]" prefix as every other console message
 static void send_console(player::Player* p, const std::string& msg) {
     if (!p) return;
-    packet::Variant var{};
-    var.add("OnConsoleMessage");
-    var.add(msg);
-    std::vector<std::byte> ext = var.serialize();
-    packet::GameUpdatePacket pkt{};
-    pkt.type           = packet::PACKET_CALL_FUNCTION;
-    pkt.net_id         = -1;
-    pkt.flags.extended = 1;
-    pkt.data_size      = static_cast<uint32_t>(ext.size());
-    ByteStream<std::uint16_t> bs{};
-    bs.write(packet::NET_MESSAGE_GAME_PACKET);
-    bs.write(pkt);
-    bs.write_data(ext.data(), ext.size());
-    p->send_packet(bs.get_data(), 0);
+    utils::PacketUtils::send_chat_message(p, msg);
 }
 
 
@@ -123,31 +116,66 @@ void AutoCollectCommand::stop() {
     s_generation.fetch_add(1);
 }
 
+// /autocollect and /ac: quick toggle
 void AutoCollectCommand::execute(client::Client* , const std::vector<std::string>& ) {
     if (!s_core) return;
 
     auto* server = s_core->get_server();
     if (!server || !server->get_player()) return;
 
-    
-    if (s_running.load()) {
+    set_enabled(server->get_player(), !s_running.load());
+}
+
+void AutoCollectCommand::set_enabled(player::Player* player, bool enable) {
+    if (enable == s_running.load()) return;
+
+    if (!enable) {
         s_running = false;
         s_generation.fetch_add(1);
-        send_console(server->get_player(), "`0[ `bVinProxy `0] `4AutoCollect stopped.");
+        send_console(player, "`4AutoCollect stopped.");
         return;
     }
 
     s_running = true;
     const uint64_t gen = ++s_generation;
-    send_console(server->get_player(), "`0[ `bVinProxy `0] `2AutoCollect started.");
+    send_console(player, fmt::format("`2AutoCollect started. `9Range: `2{} `9tiles.", s_range_tiles.load()));
     std::thread([gen]() { run_autocollect(gen); }).detach();
 }
 
+// /collect: Auto Collect page
+void AutoCollectCommand::show_dialog(player::Player* player) {
+    const int range = s_range_tiles.load();
+    std::ostringstream d;
+    d << "set_default_color|`o\n";
+    d << "add_label_with_icon|big|`9Auto Collect Page|left|112|\n";
+    d << "add_spacer|small|\n";
+    d << "add_checkbox|enable_auto_collect|`2Enable Auto Collect|" << (s_running.load() ? 1 : 0) << "|\n";
+    d << command::autofarm::desc_text("`oToggle this to start or stop collecting floating items. /ac and /autocollect do the same.");
+    d << "add_text_input|auto_collect_range|`cCollect Range (tiles): |" << range << "|3|\n";
+    d << command::autofarm::tiny_text("`9How far from you floating items are collected. 1 tile = 32 pixels. Allowed "
+        + std::to_string(MIN_RANGE_TILES) + "-" + std::to_string(MAX_RANGE_TILES) + " (100 covers a whole 100-wide world).");
+    d << command::autofarm::tiny_text("`9Current range: `2" + std::to_string(range) + " tiles `9(" + std::to_string(range * 32) + " pixels)");
+    d << "add_spacer|small|\n";
+    d << "end_dialog|auto_collect_page|Cancel|OK|\n";
+    command::autofarm::send_dialog(player, d.str());
+}
 
+void AutoCollectCommand::handle_dialog_response(player::Player* player, const std::string& raw) {
+    TextParse tp{raw};
+    int v = 0;
+    if (command::autofarm::parse_int(tp.get("auto_collect_range"), v)) {
+        const int clamped = std::clamp(v, MIN_RANGE_TILES, MAX_RANGE_TILES);
+        s_range_tiles = clamped;
+        if (clamped != v)
+            send_console(player, fmt::format("`9Range must be {}-{} tiles, set to `2{}`9.", MIN_RANGE_TILES, MAX_RANGE_TILES, clamped));
+        else
+            send_console(player, fmt::format("`9Collect range set to `2{} `9tiles.", clamped));
+    }
+    set_enabled(player, command::autofarm::checkbox_on(tp, "enable_auto_collect"));
+}
 
 void AutoCollectCommand::run_autocollect(uint64_t generation) {
     constexpr auto  INTERVAL = std::chrono::milliseconds(500);
-    constexpr float RADIUS   = 3200.0f; 
 
     spdlog::info("[AutoCollect] started gen={}", generation);
     
@@ -176,6 +204,9 @@ void AutoCollectCommand::run_autocollect(uint64_t generation) {
         }
 
         
+        // Read every pass so a range change from the /collect page applies immediately
+        const float RADIUS = static_cast<float>(s_range_tiles.load()) * 32.0f;
+
         float bot_x = 0.f, bot_y = 0.f;
         {
             auto px = s_core->get_config().get<std::string>("player.position.x");

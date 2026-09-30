@@ -80,11 +80,7 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"info", "/proxy", "", "(Shows Commands & Help Directory)"},
         {"info", "/news", "", "(Shows Proxy News and Commands)"},
         {"info", "/gui", "", "(Open Floating ImGui Desktop Window)"},
-        {"info", "/ping", "", "(Toggle Real-Time Ping Latency Display)"},
-        {"info", "/eventmenu", "", "(Open Live Event Menu)"},
         {"info", "/discord", "", "(Join Proxy Discord Community)"},
-        {"info", "/showxy", "", "(Show X,Y Tile Coordinate Position)"},
-        {"info", "/uid", "", "(Show Current Player UID)"},
         {"info", "/scan", "", "(Toggle World Item Scan / Extract Mode)"},
         {"info", "/track", "", "(Toggle Drop Tracker - Logs All Drops In World)"},
 
@@ -99,7 +95,7 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"customize", "/options", "", "(Open All Selectable Feature Options Page)"},
 
         // --- 2. Main Features ---
-        {"mf", "/speed", "[1-5]", "(Select Movement Speed Multiplier)"},
+        {"mf", "/speed", "[speed] [gravity]", "(Open Speed & Gravity Settings)"},
         {"mf", "/wrench", "", "(Select Wrench Mode: Pull/Kick/Ban)"},
         {"mf", "/wrenchmsg", "", "(Toggle Show Wrench Chat Messages)"},
         {"mf", "/wrenchspam", "", "(Toggle Wrench Spam Auto Mode)"},
@@ -118,13 +114,19 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"mf", "/buy", "", "(Fast Growtopia Shop Purchase Page)"},
         {"mf", "/host", "", "(Casino Host Settings & Custom Tax Amount)"},
         {"mf", "/growscan", "", "(Free Fully Functional Growscan On Punch/Scan)"},
-        {"mf", "/collect", "", "(Collect Floating Items Within 10 Tiles Range)"},
+        {"mf", "/collect", "", "(Auto Collect Page - Enable/Disable & Set Collect Range)"},
         {"mf", "/count", "", "(Edit Drop/Trash/Recycle/Vend Count Settings)"},
         {"mf", "/fd", "", "(Enable/Disable Fast Drop Auto-Confirm)"},
         {"mf", "/ft", "", "(Enable/Disable Fast Trash Auto-Confirm)"},
         {"mf", "/fr", "", "(Enable/Disable Fast Recycle Auto-Confirm)"},
-        {"mf", "/afish", "", "(Auto Fish Bot - Automatically Catches Fish)"},
-        {"mf", "/afarm", "", "(Auto Farm Bot - Automatically Punches & Farms)"},
+        {"mf", "/autofish", "", "(Auto Fish Bot - Automatically Catches Fish)"},
+        {"mf", "/autofarm", "", "(Auto Farm Bot - Automatically Punches & Farms)"},
+        {"mf", "/farm", "", "(Toggle Auto Farm On/Off)"},
+        {"mf", "/fish", "", "(Toggle Auto Fish On/Off)"},
+        {"mf", "/autoharvest", "", "(Auto Harvest Page - Walks To & Punches Ready Trees)"},
+        {"mf", "/harvest", "", "(Toggle Auto Harvest On/Off)"},
+        {"mf", "/autoplant", "", "(Auto Plant Page - Plants Seeds On A Target Block)"},
+        {"mf", "/plant", "", "(Toggle Auto Plant On/Off)"},
         {"mf", "/autocollect", "", "(Toggle Auto Collect Floating Dropped Items)"},
         {"mf", "/ac", "", "(Shortcut To Enable Autocollect)"},
         {"mf", "/autocomp", "", "(Compress 100 WLs to 1 DL Automatically)"},
@@ -146,8 +148,6 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"casino", "/tp1, /tp2, /tp3, /tp4", "", "(Teleport/Pathfind To Saved Pos1-4)"},
         {"casino", "/qq", "[on/off]", "(Toggle Show QQ Number in Roulette Spin)"},
         {"casino", "/reme", "[on/off]", "(Toggle Show REME Spin in Roulette Spin)"},
-        {"casino", "/dpos", "", "(Set Target Drop Position Where You Stand)"},
-        {"casino", "/dropat", "[amt]", "(Teleport To Saved Drop Spot & Drop Prize)"},
 
         // --- 5. Economy & Drops ---
         {"econ", "/dw", "<amount>", "(Drop World Locks Without Confirmation Dialog)"},
@@ -158,6 +158,8 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"econ", "/daw", "", "(Drop All Locks: WLs, DLs & BGLs)"},
         {"econ", "/dbglvis", "<amount>", "(Visual Drop Blue Gem Locks [No Loss])"},
         {"econ", "/dropall", "[qty]", "(Drop Items From Inventory [All Or Quantity])"},
+        {"econ", "/dpos", "", "(Set Target Drop Position Where You Stand)"},
+        {"econ", "/dropat", "[amt]", "(Teleport To Saved Drop Spot & Drop Prize)"},
         {"econ", "/balance", "", "(Shows Your Current World Lock Balance)"},
 
         // --- 6. Clothes & Visual Customization ---
@@ -202,6 +204,7 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"information", "/showxy", "", "(Show Current X,Y Tile Coordinate Position)"},
         {"information", "/uid", "", "(Display Current Player User ID)"},
         {"information", "/scan", "", "(Toggle World Item Scan & Extract Mode)"},
+        {"information", "/ping", "", "(Toggle Real-Time Ping Latency Display)"},
         {"information", "/track", "", "(Toggle Drop Tracker Log)"},
         {"information", "/balance", "", "(Shows Your Current World Lock Balance)"},
 
@@ -390,7 +393,7 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, c
 
         // Tab Header Title
         if (active_tab == 0) {
-            dialog << "add_label_with_icon|big|`2VinProxy Premium Gazette``|left|7188|\n";
+            dialog << "add_label_with_icon|big|`2VinProxy Premium Commands``|left|7188|\n";
         } else if (active_tab == 1) {
             dialog << "add_label_with_icon|big|`wVinProxy: `3Main Features & Gameplay``|left|5956|\n";
         } else if (active_tab == 2) {
