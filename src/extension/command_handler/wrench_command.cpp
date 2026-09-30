@@ -5,10 +5,15 @@
 #include "../../server/server.hpp"
 #include "../../utils/byte_stream.hpp"
 #include "../../utils/packet_utils.hpp"
+#include "fastdoor_command.hpp"
 
 #include <sstream>
+#include <string>
 
 namespace command {
+
+// Item id for the red square "Disable" icon (170 = Red Block)
+static constexpr int kDisableIcon = 170;
 
 core::Core* WrenchCommand::s_core = nullptr;
 
@@ -42,19 +47,52 @@ void WrenchCommand::send_settings_dialog(player::Player* out) {
         catch (...) { s_core->get_config().set<bool>(key, defv); return defv; }
     };
 
-    const int auto_pull = getb("features.wrench.auto_pull", false) ? 1 : 0;
-    const int auto_kick = getb("features.wrench.auto_kick", false) ? 1 : 0;
-    const int auto_ban = getb("features.wrench.auto_ban", false) ? 1 : 0;
+    // Active mode uses the same Ban > Kick > Pull priority the parser applies
+    const bool is_ban = getb("features.wrench.auto_ban", false);
+    const bool is_kick = getb("features.wrench.auto_kick", false);
+    const bool is_pull = getb("features.wrench.auto_pull", false);
+    const char* mode = is_ban ? "Ban" : is_kick ? "Kick" : is_pull ? "Pull" : "Disable";
+
+    const int right_click_kick = getb("features.wrench.right_click_kick", false) ? 1 : 0;
+    const int fast_entrance = FastDoorCommand::is_enabled() ? 1 : 0;
+
+    // Mode icon button: selected mode gets the yellow frame + purple label, others red
+    auto mode_button = [&](const char* id, const char* label, int icon) {
+        const bool selected = std::string(mode) == label;
+
+        // Growtopia uses large font for short text and downscales longer text (like "Disable").
+        // Padding shorter labels with symmetrical spaces forces Growtopia to use the same small font.
+        std::string display_label = label;
+        if (display_label == "Pull") display_label = "   Pull   ";
+        else if (display_label == "Kick") display_label = "   Kick   ";
+        else if (display_label == "Ban") display_label = "    Ban    ";
+
+        std::ostringstream b;
+        b << "add_button_with_icon|" << id << "|" << (selected ? "`5" : "`4") << display_label << "``|"
+          << (selected ? "staticYellowFrame" : "staticBlueFrame") << "|" << icon << "|\n";
+        return b.str();
+    };
 
     std::ostringstream dialog;
     dialog << "set_default_color|`o\n";
-    dialog << "add_label_with_icon|big|`wAuto Wrench Settings``|left|18\n";
-    dialog << "add_spacer|small\n";
-    dialog << "add_checkbox|wrench_auto_pull|Auto Wrench Pull|"<< auto_pull <<"\n";
-    dialog << "add_checkbox|wrench_auto_kick|Auto Wrench Kick|"<< auto_kick <<"\n";
-    dialog << "add_checkbox|wrench_auto_ban|Auto Wrench Ban|"<< auto_ban <<"\n";
-    dialog << "add_smalltext|Priority: Ban > Kick > Pull (when multiple enabled)|left\n";
-    dialog << "end_dialog|wrench_settings|Close|Save";
+    dialog << "add_label_with_icon|big|`5Choose Wrench Mode``|left|32|\n";
+    dialog << "add_textbox|`wCurrent Wrench Mode: `5" << mode << "``|left|\n";
+    dialog << "add_spacer|small|\n";
+    dialog << mode_button("wm_pull", "Pull", 32);
+    dialog << mode_button("wm_kick", "Kick", 32);
+    dialog << mode_button("wm_ban", "Ban", 32);
+    dialog << mode_button("wm_disable", "Disable", kDisableIcon);
+    dialog << "add_button_with_icon||END_LIST|noflags|0|\n";
+    dialog << "add_spacer|small|\n";
+    dialog << "add_checkbox|wrench_right_kick|`5Enable `wRight Click Kick|" << right_click_kick << "|\n";
+    dialog << "add_custom_margin|x:0;y:-32|\n";
+    dialog << "add_custom_textbox|`oGrants The Ability To `4Kick `9A Person With Right Click.|size:tiny;color:200,200,200,200|\n";
+    dialog << "add_custom_margin|x:0;y:10|\n";
+    dialog << "add_checkbox|wrench_fast_entrance|`5Enable `wFast Right Click Open/Close Entrances|" << fast_entrance << "|\n";
+        dialog << "add_custom_margin|x:0;y:-32|\n";
+    dialog << "add_custom_textbox|`oGrants The Ability To Open/Close Entrances By Right Mouse Click Without Additional Dialogs.|size:tiny;color:200,200,200,200|\n";
+    dialog << "add_custom_margin|x:0;y:10|\n";
+    dialog << "end_dialog|wrench_settings|Cancel|Okey|\n";
 
     packet::Variant var{};
     var.add("OnDialogRequest");
@@ -81,20 +119,31 @@ void WrenchCommand::apply_dialog_settings(const TextParse& tp) {
         return v == "1" || v == "true" || v == "on";
     };
 
-    const bool auto_pull = to_bool(tp.get("wrench_auto_pull"));
-    const bool auto_kick = to_bool(tp.get("wrench_auto_kick"));
-    const bool auto_ban = to_bool(tp.get("wrench_auto_ban"));
+    const std::string button = tp.get("buttonClicked");
+    if (button == "Cancel") return;
 
-    s_core->get_config().set<bool>("features.wrench.auto_pull", auto_pull);
-    s_core->get_config().set<bool>("features.wrench.auto_kick", auto_kick);
-    s_core->get_config().set<bool>("features.wrench.auto_ban", auto_ban);
+    auto& cfg = s_core->get_config();
 
-    if (s_core->get_server() && s_core->get_server()->get_player()) {
-        utils::PacketUtils::send_chat_message(
-            s_core->get_server()->get_player(),
-            "`2Wrench settings updated``.",
-            false
-        );
+    // Checkboxes are sent with every click (mode button or Okey)
+    cfg.set<bool>("features.wrench.right_click_kick", to_bool(tp.get("wrench_right_kick")));
+    FastDoorCommand::set_enabled(to_bool(tp.get("wrench_fast_entrance")));
+
+    // Mode buttons select exactly one mode; Okey leaves the mode as is
+    const bool mode_click = button.rfind("wm_", 0) == 0;
+    if (mode_click) {
+        cfg.set<bool>("features.wrench.auto_pull", button == "wm_pull");
+        cfg.set<bool>("features.wrench.auto_kick", button == "wm_kick");
+        cfg.set<bool>("features.wrench.auto_ban", button == "wm_ban");
+    }
+    cfg.save();
+
+    auto* out = s_core->get_server() ? s_core->get_server()->get_player() : nullptr;
+    if (!out) return;
+
+    if (mode_click) {
+        send_settings_dialog(out);   // re-open with the new mode highlighted
+    } else {
+        utils::PacketUtils::send_chat_message(out, "`2Wrench settings updated``.", false);
     }
 }
 

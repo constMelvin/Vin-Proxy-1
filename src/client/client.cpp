@@ -35,6 +35,7 @@
 #include "../utils/gems_manager.hpp"
 #include "../extension/command_handler/autocollect_command.hpp"
 #include "../extension/command_handler/utility_commands.hpp"
+#include "../extension/command_handler/extended_commands.hpp"
 #include <cmath>
 
 namespace client {
@@ -488,8 +489,8 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                             patched_tank.vec_x = 1000.0f;      // punch reach X (same as /mstate)
                             patched_tank.vec_y = 400.0f;       // punch reach Y (same as /mstate)
                             patched_tank.float_var = 200.0f;   // water speed
-                            patched_tank.vec_x2 = 250.0f;      // horizontal speed
-                            patched_tank.vec_y2 = 1000.0f;     // gravity
+                            patched_tank.vec_x2 = command::SpeedCommand::get_speed();    // horizontal speed (/speed)
+                            patched_tank.vec_y2 = command::SpeedCommand::get_gravity();  // gravity (/speed)
                         }
 
                         ByteStream<std::uint16_t> new_bs{};

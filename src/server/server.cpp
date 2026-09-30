@@ -18,6 +18,7 @@
 #include "../packet/tank_packet.hpp"
 #include "../extension/command_handler/doorid_command.hpp"
 #include "../extension/command_handler/position_command.hpp"
+#include "../extension/command_handler/extended_commands.hpp"
 #include "../utils/items_dat_patcher.hpp"
 #include "../utils/gems_manager.hpp"
 #include "../utils/packet_utils.hpp"
@@ -474,7 +475,24 @@ void Server::on_receive(ENetPeer* peer, ENetPacket* packet)
                 }
             }
 
-            
+            // /speed (LuckyProxy pingreply): report custom gravity/speed in the ping reply.
+            // In a ping reply, vec_x2 = gravity and vec_y2 = move speed.
+            if (game_update_packet.type == packet::PACKET_PING_REPLY &&
+                ext_data.empty() && command::SpeedCommand::is_custom()) {
+                const auto& raw_bytes = byte_stream.get_data();
+                if (raw_bytes.size() >= start_pos + sizeof(packet::TankUpdatePacket)) {
+                    packet::TankUpdatePacket patched_tank =
+                        *reinterpret_cast<const packet::TankUpdatePacket*>(raw_bytes.data() + start_pos);
+                    patched_tank.vec_x2 = command::SpeedCommand::get_gravity();
+                    patched_tank.vec_y2 = command::SpeedCommand::get_speed();
+
+                    ByteStream<std::uint16_t> new_bs{};
+                    new_bs.write(packet::NET_MESSAGE_GAME_PACKET);
+                    new_bs.write(patched_tank);
+                    byte_stream = std::move(new_bs);
+                }
+            }
+
             if (game_update_packet.type == packet::PACKET_CALL_FUNCTION) {
                 spdlog::info("[SERVER-DEBUG] Got PACKET_CALL_FUNCTION from client, ext_data size: {}", ext_data.size());
                 
