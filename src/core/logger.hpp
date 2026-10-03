@@ -19,14 +19,16 @@ public:
     [[nodiscard]] static std::shared_ptr<spdlog::sinks::stdout_color_sink_mt> create_console_sink()
     {
         auto console_sink{ std::make_shared<spdlog::sinks::stdout_color_sink_mt>() };
-        
-        
-        console_sink->set_pattern("%^%v%$");
-        
+
+        // "[12:34:56] warning [AutoPull] message" - the level is coloured
+        console_sink->set_pattern("[%H:%M:%S] %^%-7l%$ %v");
+
+        // The terminal shows info and above; debug details (packet dumps, positions, ...)
+        // still go to proxy.log for bug hunting
 #ifdef GTPROXY_DEBUG
         console_sink->set_level(spdlog::level::trace);
 #else
-        console_sink->set_level(spdlog::level::debug);
+        console_sink->set_level(spdlog::level::info);
 #endif
         
         return console_sink;
@@ -39,7 +41,8 @@ public:
             1024 * 1024 * 2,
             4
         );
-        file_sink->set_pattern("[%Y-%m-%d %H:%M:%S] %v");
+        file_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] %v");
+        file_sink->set_level(spdlog::level::debug);
         return file_sink;
     }
 

@@ -1,4 +1,5 @@
 #include "banfire_command.hpp"
+#include "lucky_common.hpp"
 #include "../../client/client.hpp"
 #include "../../player/player.hpp"
 #include "../../server/server.hpp"
@@ -32,6 +33,19 @@ bool BanFireCommand::is_enabled() {
 void BanFireCommand::toggle() {
     s_enabled = !s_enabled;
     spdlog::info("BanFireCommand: {}", s_enabled ? "ENABLED" : "DISABLED");
+}
+
+// LuckyProxy autobanfire: world ban whoever uses a Pocket Lighter / Eldritch Flame
+bool BanFireCommand::on_talk_bubble(uint32_t net_id, const std::string& text) {
+    if (!s_enabled || net_id == 0) return false;
+    if (text.find("`7[```4MWAHAHAHA!! FIRE FIRE FIRE") == std::string::npos &&
+        text.find("`7[```4BURN, PUNY MORTALS!") == std::string::npos)
+        return false;
+    spdlog::info("[BanFire] Banning netID {} for using a fire item", net_id);
+    const std::string id = std::to_string(net_id);
+    lucky::send_server_text("action|wrench\n|netid|" + id);
+    lucky::send_server_text("action|dialog_return\ndialog_name|popup\nnetID|" + id + "|\nnetID|" + id + "|\nbuttonClicked|worldban");
+    return true;
 }
 
 void BanFireCommand::execute(client::Client* client, const std::vector<std::string>& ) {

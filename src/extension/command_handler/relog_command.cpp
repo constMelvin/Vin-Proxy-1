@@ -74,6 +74,7 @@ void RelogCommand::execute(client::Client* client, const std::vector<std::string
     ByteStream<std::uint16_t> bs_exit{};
     bs_exit.write(packet::NET_MESSAGE_GAME_MESSAGE);
     bs_exit.write(tp_exit.get_raw(), false);
+    bs_exit.write(std::uint8_t{0});   // null-terminated, or the server reads "quit_to_exi" and ignores it
     client->get_player()->send_packet(bs_exit.get_data(), 0);
 
     // After 300ms, send join_request
@@ -90,6 +91,7 @@ void RelogCommand::execute(client::Client* client, const std::vector<std::string
         ByteStream<std::uint16_t> bs_join{};
         bs_join.write(packet::NET_MESSAGE_GAME_MESSAGE);
         bs_join.write(tp_join.get_raw(), false);
+        bs_join.write(std::uint8_t{0});
         core->get_client()->get_player()->send_packet(bs_join.get_data(), 0);
     }).detach();
 }

@@ -13,6 +13,7 @@
 #include "../command_handler/vendloc_command.hpp"
 #include "../command_handler/clothes_command.hpp"
 #include "../command_handler/utility_commands.hpp"
+#include "../command_handler/lucky_common.hpp"
 #include "../../utils/visual_items_manager.hpp"
 #include <spdlog/spdlog.h>
 #include <memory>
@@ -97,6 +98,7 @@ public:
             command::VendLocCommand::set_item_database(database_.get());
             command::VendTPCommand::set_item_database(database_.get());
             command::FindPathCommand::set_item_database(database_.get());
+            command::lucky::set_item_database(database_.get());
             
             
             SetItemDatabase(database_.get());

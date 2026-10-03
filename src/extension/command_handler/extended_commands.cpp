@@ -1,5 +1,6 @@
 #include "extended_commands.hpp"
 #include "autocollect_command.hpp"
+#include "onspawn_commands.hpp"
 #include "../../client/client.hpp"
 #include "../../player/player.hpp"
 #include "../../server/server.hpp"
@@ -118,6 +119,7 @@ TrackCommand::TrackCommand() : CommandBase({"track"}, {}, "Toggle drop tracker l
 std::unique_ptr<CommandBase> TrackCommand::clone() const { return std::make_unique<TrackCommand>(*this); }
 void TrackCommand::set_core(core::Core* core) { s_core = core; }
 bool TrackCommand::is_enabled() { return s_enabled; }
+void TrackCommand::set_enabled(bool enabled) { s_enabled = enabled; }
 
 void TrackCommand::execute(client::Client* client, const std::vector<std::string>&) {
     auto* player = resolve_player(s_core, client);
@@ -141,10 +143,17 @@ std::unique_ptr<CommandBase> GhostCommand::clone() const { return std::make_uniq
 void GhostCommand::set_core(core::Core* core) { s_core = core; }
 bool GhostCommand::is_enabled() { return s_enabled; }
 
+// LuckyProxy /ghost: noclip bit in the character state; client movement is held back from the server
+void GhostCommand::set_enabled(bool enabled) {
+    s_enabled = enabled;
+    if (s_core && s_core->get_server() && s_core->get_server()->get_player())
+        SpeedCommand::send_state(s_core->get_server()->get_player());
+}
+
 void GhostCommand::execute(client::Client* client, const std::vector<std::string>&) {
     auto* player = resolve_player(s_core, client);
     if (!player) return;
-    s_enabled = !s_enabled;
+    set_enabled(!s_enabled);
     if (s_enabled)
         utils::PacketUtils::send_chat_message(player, "`#@Moderator `9Mode is now `2ON `9- Ghost mode active");
     else
@@ -172,28 +181,6 @@ void AutoMsgCommand::execute(client::Client* client, const std::vector<std::stri
     else
         utils::PacketUtils::send_chat_message(player, "`6AutoMsg `9is now `4disabled");
     spdlog::info("AutoMsgCommand: {}", s_enabled ? "ON" : "OFF");
-}
-
-// ============================================================
-// AutoPullCommand
-// ============================================================
-core::Core* AutoPullCommand::s_core = nullptr;
-bool AutoPullCommand::s_enabled = false;
-
-AutoPullCommand::AutoPullCommand() : CommandBase({"autopull", "pullauto"}, {}, "Toggle auto pull players on join", 0) {}
-std::unique_ptr<CommandBase> AutoPullCommand::clone() const { return std::make_unique<AutoPullCommand>(*this); }
-void AutoPullCommand::set_core(core::Core* core) { s_core = core; }
-bool AutoPullCommand::is_enabled() { return s_enabled; }
-
-void AutoPullCommand::execute(client::Client* client, const std::vector<std::string>&) {
-    auto* player = resolve_player(s_core, client);
-    if (!player) return;
-    s_enabled = !s_enabled;
-    if (s_enabled)
-        utils::PacketUtils::send_chat_message(player, "`2Auto Pull `9is now `2ON `9- players will be pulled when they join");
-    else
-        utils::PacketUtils::send_chat_message(player, "`2Auto Pull `9is now `4OFF");
-    spdlog::info("AutoPullCommand: {}", s_enabled ? "ON" : "OFF");
 }
 
 // ============================================================
@@ -326,7 +313,7 @@ void SpeedCommand::show_dialog(player::Player* player) {
     dlg << "add_label_with_icon|big|Speed Settings|left|2324|\n";
     dlg << "add_text_input|speed_x|`9Speed:|" << s_speed << "|7|\n";
     dlg << "add_text_input|speed_y|`9Gravity:|" << s_gravity << "|7|\n";
-    dlg << "end_dialog|speed_page|Cancel|Okey|\n";
+    dlg << "end_dialog|speed_page|Cancel|Okay|\n";
     send_dialog(player, dlg.str());
 }
 
@@ -342,6 +329,7 @@ void SpeedCommand::send_state(player::Player* player) {
     int type = static_cast<int>(packet::PACKET_SET_CHARACTER_STATE);
     int32_t nid = static_cast<int32_t>(local.netID);
     int state = (1 << 1) | (1 << 24);   // double jump + super supporter (as LuckyProxy)
+    if (GhostCommand::is_enabled()) state |= 1 << 0;   // ghost / noclip (LuckyProxy sendState)
     float x = 1000.0f, y = 400.0f;
     float waterspeed = 200.0f;
     memcpy(data + 0, &type, 4);
@@ -634,55 +622,6 @@ void HotkeysCommand::execute(client::Client* client, const std::vector<std::stri
     dlg << "add_quick_exit|\n";
     send_dialog(player, dlg.str());
     spdlog::info("HotkeysCommand: dialog sent");
-}
-
-// ============================================================
-// OptionsPageCommand
-// ============================================================
-core::Core* OptionsPageCommand::s_core = nullptr;
-
-OptionsPageCommand::OptionsPageCommand() : CommandBase({"options"}, {}, "Open all features options page", 0) {}
-std::unique_ptr<CommandBase> OptionsPageCommand::clone() const { return std::make_unique<OptionsPageCommand>(*this); }
-void OptionsPageCommand::set_core(core::Core* core) { s_core = core; }
-
-void OptionsPageCommand::execute(client::Client* client, const std::vector<std::string>&) {
-    auto* player = resolve_player(s_core, client);
-    if (!player) return;
-
-    std::ostringstream dlg;
-    dlg << "set_default_color|`o\n";
-    dlg << "add_label_with_icon|big|`2VinProxy Options``|left|32|\n";
-    dlg << "add_spacer|small|\n";
-
-    // Toggle features as checkboxes
-    dlg << fmt::format("add_checkbox|opt_showxy|`^Show X,Y Position|{}\n", ShowXYCommand::is_enabled() ? 1 : 0);
-    dlg << "add_desc_text|`9Display your tile coordinates above your head\n";
-    dlg << fmt::format("add_checkbox|opt_track|`^Drop Tracker|{}\n", TrackCommand::is_enabled() ? 1 : 0);
-    dlg << "add_desc_text|`9Log all item drops in this world\n";
-    dlg << fmt::format("add_checkbox|opt_scan|`^Scan Mode|{}\n", ScanCommand::is_enabled() ? 1 : 0);
-    dlg << "add_desc_text|`9Scan and extract world items\n";
-    dlg << fmt::format("add_checkbox|opt_ghost|`^Ghost Mode|{}\n", GhostCommand::is_enabled() ? 1 : 0);
-    dlg << "add_desc_text|`9Moderator ghost/invisibility mode\n";
-    dlg << fmt::format("add_checkbox|opt_autopull|`^Auto Pull|{}\n", AutoPullCommand::is_enabled() ? 1 : 0);
-    dlg << "add_desc_text|`9Auto pull players when they join\n";
-    dlg << fmt::format("add_checkbox|opt_automsg|`^Auto Message|{}\n", AutoMsgCommand::is_enabled() ? 1 : 0);
-    dlg << "add_desc_text|`9Broadcast automated messages\n";
-    dlg << fmt::format("add_checkbox|opt_fr|`^Fast Recycle|{}\n", FastRecycleCommand::is_enabled() ? 1 : 0);
-    dlg << "add_desc_text|`9Auto-confirm recycle dialogs\n";
-    dlg << fmt::format("add_checkbox|opt_wrenchmsg|`^Wrench Messages|{}\n", WrenchMsgCommand::is_enabled() ? 1 : 0);
-    dlg << "add_desc_text|`9Show wrench action chat messages\n";
-    dlg << fmt::format("add_checkbox|opt_wrenchspam|`^Wrench Spam|{}\n", WrenchSpamCommand::is_enabled() ? 1 : 0);
-    dlg << "add_desc_text|`9Auto wrench spam mode\n";
-    dlg << fmt::format("add_checkbox|opt_blink|`^Blink Mode|{}\n", BlinkCommand::is_enabled() ? 1 : 0);
-    dlg << "add_desc_text|`9Rainbow color cycle blink visual\n";
-    dlg << fmt::format("add_checkbox|opt_fastvend|`^Fast Vend|{}\n", FastVendToggleCommand::is_enabled() ? 1 : 0);
-    dlg << "add_desc_text|`9Auto-confirm vend dialogs\n";
-
-    dlg << "add_spacer|small|\n";
-    dlg << "end_dialog|options_page_dlg|Cancel|Apply|\n";
-    dlg << "add_quick_exit|\n";
-    send_dialog(player, dlg.str());
-    spdlog::info("OptionsPageCommand: dialog sent");
 }
 
 // ============================================================

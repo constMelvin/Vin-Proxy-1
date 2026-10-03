@@ -89,9 +89,9 @@ void TitleCommand::send_title_gui(client::Client* client, core::Core* core) {
 
         dialog << "add_spacer|small|\n";
 
-        // ── Footer ── Cancel / Okey matching screenshot
+        // ── Footer ── Cancel / Okay matching screenshot
         dialog << "add_quick_exit|\n";
-        dialog << "end_dialog|title_gui|Cancel|Okey|";
+        dialog << "end_dialog|title_gui|Cancel|Okay|";
 
         packet::Variant variant{};
         variant.add("OnDialogRequest");

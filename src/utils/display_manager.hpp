@@ -126,7 +126,8 @@ public:
         
         auto* server = core->get_server();
         if (!server || !server->get_player() || !server->get_player()->is_connected()) {
-            spdlog::warn("DisplayManager: Server not available");
+            // Runs every second; the game simply isn't connected (e.g. after /logout), not an error
+            spdlog::debug("DisplayManager: game client not connected, skipped name update");
             return;
         }
         

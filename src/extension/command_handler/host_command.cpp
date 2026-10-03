@@ -111,7 +111,7 @@ void HostCommand::apply_dialog_settings(const TextParse& tp) {
 // QQCommand
 // ---------------------------------------------------------------------------
 QQCommand::QQCommand() : CommandBase(
-    {"qq", "showqq"},
+    {"qq", "qeme", "showqq"},
     {"[on/off]"},
     "Toggle Show QQ Number in roulette spin",
     0

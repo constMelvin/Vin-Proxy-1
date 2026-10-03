@@ -1,4 +1,13 @@
 #include "moddetect_command.hpp"
+#include "lucky_common.hpp"
+#include "autocollect_command.hpp"
+#include "save_world_command.hpp"
+#include "../../client/client.hpp"
+#include "../../player/player.hpp"
+#include "../../utils/player_tracker.hpp"
+#include "../../utils/world_manager.hpp"
+#include "../../utils/dialog.hpp"
+#include <thread>
 
 #include "../../server/server.hpp"
 #include "../../utils/text_parse.hpp"
@@ -155,10 +164,110 @@ bool ModDetectCommand::is_enabled() {
 }
 
 void ModDetectCommand::toggle() {
-    
-    ModDetectCommand cmd;
-    
-    cmd.execute(nullptr, {});
+    if (!s_core) return;
+    s_core->get_config().set<bool>("features.moddetect", !is_enabled());
+}
+
+// ------------------------------------------------------------
+// Mod Detect Settings (LuckyProxy "kadaryt" page)
+// ------------------------------------------------------------
+namespace {
+struct ModAction {
+    const char* id;          // checkbox id (LuckyProxy names)
+    const char* config_key;
+    const char* label;
+    const char* desc;
+};
+const ModAction kModActions[] = {
+    {"leaveworld", "features.moddetect.exit_world", "`2Auto `9Exit World", "Automatically Exit World When Moderator Come."},
+    {"isjunkvisusnx", "features.moddetect.ban_all", "`2Ban `9Everyone in World", "Automatically Ban Everyone in World."},
+    {"unaccesslucky", "features.moddetect.unaccess", "`2Auto `9Unaccess", "Automatically Unaccess Yourself in The World."},
+    {"masuksave", "features.moddetect.warp_save", "`2Auto `9Warp To Save World", "Automatically Warp To Save World /setsave"},
+    {"tamaknibos", "features.moddetect.collect", "`2Auto `9Collect Items 10 Far", "Automatically Auto Collect 10 Far."},
+};
+
+bool mod_action_on(const char* config_key) { return lucky::cfg_flag(config_key, false); }
+
+} // namespace
+
+void ModDetectCommand::show_settings_dialog() {
+    utils::Dialog dlg;
+    dlg.label_with_icon("`2Auto Mod Detect Settings", 278)
+       .textbox("`2When `#@Moderator `2 Joins The World You will:");
+    for (const auto& a : kModActions)
+        dlg.checkbox(a.id, a.label, mod_action_on(a.config_key)).description(a.desc);
+    dlg.end_dialog("mod_settings_spare", "Cancel", "Okay");
+    dlg.send(lucky::local_out());
+}
+
+void ModDetectCommand::handle_settings_dialog(const std::string& raw) {
+    TextParse tp{raw};
+    for (const auto& a : kModActions) {
+        std::string v = tp.get(a.id);
+        if (v.empty()) continue;
+        lucky::cfg_set(a.config_key, v[0] == '1');
+    }
+    lucky::cfg_save();
+    spdlog::info("[ModDetect] Settings saved");
+    lucky::log("`2Mod Detect settings saved``.");
+}
+
+// LuckyProxy itsmod(): actions when a moderator joins the world
+void ModDetectCommand::run_mod_actions() {
+    if (mod_action_on("features.moddetect.collect")) {
+        auto* core = lucky::get_core();
+        auto* to_server = core && core->get_client() ? core->get_client()->get_player() : nullptr;
+        const auto local = utils::PlayerTracker::get_instance().get_local_player();
+        const auto pos = utils::PlayerTracker::get_instance().get_player_position(local.netID);
+        constexpr float kRange = 10.0f * 32.0f;
+        int collected = 0;
+        for (const auto& item : utils::WorldManager::get_instance().get_all_dropped_items()) {
+            const float dx = item.X - pos.x, dy = item.Y - pos.y;
+            if (dx * dx + dy * dy > kRange * kRange) continue;
+            AutoCollectCommand::send_collect_packet(to_server, item.Uid, item.X, item.Y);
+            ++collected;
+        }
+        spdlog::info("[ModDetect] Auto collecting {} item(s) within 10 tiles", collected);
+        if (collected > 0) lucky::send_overlay("`9Auto Collecting....");
+    }
+    if (mod_action_on("features.moddetect.ban_all")) {
+        lucky::log("`9You have `4(Ban All)`9 When Mod joins option `2Enabled");
+        spdlog::info("[ModDetect] Banning everyone in the world");
+        lucky::log("`4Banning `9Everyone in the world...");
+        const uint32_t local_netid = utils::PlayerTracker::get_instance().get_local_netid();
+        for (const auto& [netid, info] : utils::PlayerTracker::get_instance().get_all_players()) {
+            if (netid == local_netid || info.name.empty()) continue;
+            lucky::send_server_input("/ban " + info.name);
+        }
+    }
+    if (mod_action_on("features.moddetect.unaccess")) {
+        spdlog::info("[ModDetect] Removing own access (/unaccess)");
+        lucky::send_server_input("/unaccess");
+        std::thread([] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            lucky::send_server_text("action|dialog_return\ndialog_name|unaccess\nbuttonClicked|Yes");
+            lucky::log("`2Done Unaccess.");
+        }).detach();
+    }
+
+    const bool exit_world = mod_action_on("features.moddetect.exit_world");
+    if (mod_action_on("features.moddetect.warp_save")) {
+        const std::string save = SaveWorldCommand::get_save_world();
+        if (!save.empty()) {
+            spdlog::info("[ModDetect] Warping to save world {}", save);
+            lucky::send_server_game_message("action|join_request\nname|" + save + "\ninvitedWorld|0");
+            return;
+        }
+        spdlog::warn("[ModDetect] Warp to save world is on but no save world is set (/setsave)");
+        lucky::log(exit_world ? "`4Save world is empty. Use /setsave, falling back to exit."
+                              : "`4Save world is empty. Use /setsave.");
+    }
+    if (exit_world) {
+        lucky::log("`9You have `4(Exit World)`9 When Mod joins option `2Enabled");
+        spdlog::info("[ModDetect] Leaving the world");
+        lucky::log("`bLeaving The World Now");
+        lucky::send_server_game_message("action|quit_to_exit");
+    }
 }
 
 void ModDetectCommand::handle_spawn_packet(const std::string& spawn_data) {
@@ -199,6 +308,7 @@ void ModDetectCommand::handle_spawn_packet(const std::string& spawn_data) {
 
     spdlog::warn("[MODDETECT] Moderator spawn detected: {} (uid={})", final_name, uid);
     send_mod_notification(s_core, final_name, uid);
+    run_mod_actions();
 }
 
 } 

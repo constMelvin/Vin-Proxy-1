@@ -1250,7 +1250,7 @@
 | `/title` | `/titles`, `/tag` | *None* | Open title selection GUI |
 | `/titleicon` | `/ticon` | *None* | Set title icon (Usage: /titleicon <0-200>) |
 | `/vision` | *None* | *None* | Apply visual background vision (item_id 1156) on tiles x:... |
-| `/weather` | *None* | `weather_id` | Change the world weather (1-255, or 0 for random) |
+| `/weather` | *None* | `[weather_id]` | Open the Custom Weather Machine (or /weather <id>) |
 
 ### Detailed Command Specifications
 
@@ -1679,13 +1679,13 @@
 #### `/weather`
 - **Class**: `WeatherCommand` in [weather_command.cpp](file:///d:/Code/Skript-Growtopia-Proxy/src/extension/command_handler/weather_command.cpp)
 - **Aliases**: `/weather`
-- **Syntax**: `/weather weather_id`
-- **Description**: Changes the visual world weather background (IDs 1 to 255, or 0 for random).
-- **Notes & Mechanics**: Changes skybox and weather theme on your screen.
+- **Syntax**: `/weather [weather_id]`
+- **Description**: Opens the Custom Weather Machine dialog (ported from LuckyProxy): click any weather machine to change the visual weather. `/weather <id>` sets an ID (1-255) directly.
+- **Notes & Mechanics**: Client-side only. Tick "Keep Weather Across All Worlds" to re-apply the chosen weather every time you enter a world.
 - **Usage Examples**:
   ```text
+  /weather
   /weather 5
-  /weather 0
   ```
 
 ---
@@ -2323,7 +2323,7 @@ A complete quick lookup reference covering all **252+** command triggers and ali
 | `/warning` | `/warn` | Moderation & Defense | - | Send a fake ban warning notification to yourself |
 | `/warp` | `/warp` | Movement & Pathfinding | `world_name` | Warp into the world specified by world_name (/exit warps ... |
 | `/wear` | `/clothes` | Visuals & Cosmetics | - | Visual clothes manager, slot sets, and clothing overrides |
-| `/weather` | `/weather` | Visuals & Cosmetics | `weather_id` | Change the world weather (1-255, or 0 for random) |
+| `/weather` | `/weather` | Visuals & Cosmetics | `[weather_id]` | Open the Custom Weather Machine (or /weather <id>) |
 | `/win1` | `/w1` | Casino & Auto-Hoster | - | Teleport to player 1 or 2 winning spot, drop prize, and r... |
 | `/win2` | `/w1` | Casino & Auto-Hoster | - | Teleport to player 1 or 2 winning spot, drop prize, and r... |
 | `/wlbank` | `/wlbank` | Economy & Banking | `<amount>` | Modify World Lock storage amount (positive=deposit, negat... |

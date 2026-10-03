@@ -62,7 +62,7 @@ private:
         
         
         if (game_packet.type == packet::PACKET_CALL_FUNCTION && game_packet.flags.extended) {
-            spdlog::info("Received PACKET_CALL_FUNCTION");
+            spdlog::debug("Received PACKET_CALL_FUNCTION");
         }
         
         
@@ -81,7 +81,7 @@ private:
             return;
         }
         
-        spdlog::info("Parsing variant, ext_data size: {}", ext_data.size());
+        spdlog::debug("Parsing variant, ext_data size: {}", ext_data.size());
         
         try {
             ByteStream<std::uint16_t> reader(const_cast<std::byte*>(ext_data.data()), ext_data.size());
@@ -92,10 +92,10 @@ private:
                 spdlog::error("Failed to read param_count");
                 return;
             }
-            spdlog::info("param_count = {}", param_count);
+            spdlog::debug("param_count = {}", param_count);
             
             if (param_count < 2) {
-                spdlog::info("Not enough parameters");
+                spdlog::debug("Not enough parameters");
                 return;
             }
             
@@ -111,11 +111,11 @@ private:
                 spdlog::error("Failed to read type1");
                 return;
             }
-            spdlog::info("type1 = {}", type1);
+            spdlog::debug("type1 = {}", type1);
             
             
             if (type1 != 2) {
-                spdlog::info("type1 is not string (expected 2, got {})", type1);
+                spdlog::debug("type1 is not string (expected 2, got {})", type1);
                 return;
             }
             
@@ -124,7 +124,7 @@ private:
                 spdlog::error("Failed to read str_len");
                 return;
             }
-            spdlog::info("str_len = {}", str_len);
+            spdlog::debug("str_len = {}", str_len);
             
             std::string function_name(str_len, '\0');
             if (!reader.read_data((std::byte*)function_name.data(), str_len)) {
@@ -132,14 +132,14 @@ private:
                 return;
             }
             
-            spdlog::info("Variant function: {}", function_name);
+            spdlog::debug("Variant function: {}", function_name);
             
             
             if (function_name != "OnDialogRequest") {
                 return;
             }
             
-            spdlog::info("Detected OnDialogRequest variant!");
+            spdlog::debug("Detected OnDialogRequest variant!");
             
             
             uint8_t index2;
@@ -155,7 +155,7 @@ private:
             }
             
             if (type2 != 2) {
-                spdlog::info("type2 is not string (expected 2, got {})", type2);
+                spdlog::debug("type2 is not string (expected 2, got {})", type2);
                 return;
             }
             
@@ -164,7 +164,7 @@ private:
                 spdlog::error("Failed to read dialog_len");
                 return;
             }
-            spdlog::info("dialog_len = {}", dialog_len);
+            spdlog::debug("dialog_len = {}", dialog_len);
             
             std::string dialog(dialog_len, '\0');
             if (!reader.read_data((std::byte*)dialog.data(), dialog_len)) {
@@ -172,7 +172,7 @@ private:
                 return;
             }
             
-            spdlog::info("Successfully parsed dialog!");
+            spdlog::debug("Successfully parsed dialog!");
             
             
             handle_vending_dialogs(evt, dialog);
@@ -184,28 +184,28 @@ private:
     }
     
     void handle_vending_dialogs(const core::EventPacket& evt, const std::string& dialog) {
-        spdlog::info("Detected OnDialogRequest");
-        spdlog::info("Dialog content (first 200 chars): {}", dialog.substr(0, std::min((size_t)200, dialog.size())));
+        spdlog::debug("Detected OnDialogRequest");
+        spdlog::debug("Dialog content (first 200 chars): {}", dialog.substr(0, std::min((size_t)200, dialog.size())));
         
         
-        spdlog::info("VendFast: Empty mode: {}", command::VendFastCommand::is_empty_mode_enabled());
-        spdlog::info("VendFast: Add mode: {}", command::VendFastCommand::is_add_mode_enabled());
-        spdlog::info("VendFast: Buy mode: {}", command::VendFastCommand::is_buy_mode_enabled());
+        spdlog::debug("VendFast: Empty mode: {}", command::VendFastCommand::is_empty_mode_enabled());
+        spdlog::debug("VendFast: Add mode: {}", command::VendFastCommand::is_add_mode_enabled());
+        spdlog::debug("VendFast: Buy mode: {}", command::VendFastCommand::is_buy_mode_enabled());
         
         
         if (dialog.find("end_dialog|vending|Close|Update|") != std::string::npos) {
-            spdlog::info("VendFast: Detected vending Update dialog");
+            spdlog::debug("VendFast: Detected vending Update dialog");
             
             
             if (command::VendFastCommand::is_empty_mode_enabled()) {
-                spdlog::info("VendFast: Empty mode is enabled, handling...");
+                spdlog::debug("VendFast: Empty mode is enabled, handling...");
                 handle_empty_mode(evt, dialog);
                 return;
             }
             
             
             if (command::VendFastCommand::is_add_mode_enabled()) {
-                spdlog::info("VendFast: Add mode is enabled, handling...");
+                spdlog::debug("VendFast: Add mode is enabled, handling...");
                 handle_add_mode(evt, dialog);
                 return;
             }
@@ -213,10 +213,10 @@ private:
         
         
         if (dialog.find("end_dialog|vending|Close|Buy|") != std::string::npos) {
-            spdlog::info("VendFast: Detected vending Buy dialog");
+            spdlog::debug("VendFast: Detected vending Buy dialog");
             
             if (command::VendFastCommand::is_buy_mode_enabled()) {
-                spdlog::info("VendFast: Buy mode is enabled, handling...");
+                spdlog::debug("VendFast: Buy mode is enabled, handling...");
                 handle_buy_mode_step1(evt, dialog);
                 return;
             }
@@ -224,16 +224,16 @@ private:
         
         
         if (dialog.find("end_dialog|vending|Cancel|OK|") != std::string::npos) {
-            spdlog::info("VendFast: Detected vending confirmation dialog");
+            spdlog::debug("VendFast: Detected vending confirmation dialog");
             
             if (command::VendFastCommand::is_buy_mode_enabled()) {
-                spdlog::info("VendFast: Buy mode is enabled, confirming...");
+                spdlog::debug("VendFast: Buy mode is enabled, confirming...");
                 handle_buy_mode_step2(evt, dialog);
                 return;
             }
         }
         
-        spdlog::info("VendFast: No matching mode or dialog pattern");
+        spdlog::debug("VendFast: No matching mode or dialog pattern");
     }
     
     void handle_empty_mode(const core::EventPacket& evt, const std::string& dialog) {

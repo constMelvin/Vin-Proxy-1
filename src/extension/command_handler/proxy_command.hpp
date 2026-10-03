@@ -14,7 +14,8 @@ public:
     
     static void set_core(core::Core* core);
     static void show_commands_gui(player::Player* player, core::Core* core, const std::string& filter = "", int active_tab = 0);
-    static void handle_dialog_return(player::Player* player, const std::string& button_clicked, const std::string& search_query);
+    static void handle_dialog_return(player::Player* player, const std::string& button_clicked, const std::string& search_query,
+                                     const std::string& raw = "");
     static bool is_active();
     static void set_active(bool active);
 };

@@ -18,6 +18,8 @@
 #include <filesystem>
 #include <fstream>
 #include "vin_tabs_data.hpp"
+#include "logs_command.hpp"
+#include "options_command.hpp"
 
 namespace command {
 
@@ -82,7 +84,8 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"info", "/gui", "", "(Open Floating ImGui Desktop Window)"},
         {"info", "/discord", "", "(Join Proxy Discord Community)"},
         {"info", "/scan", "", "(Toggle World Item Scan / Extract Mode)"},
-        {"info", "/track", "", "(Toggle Drop Tracker - Logs All Drops In World)"},
+        {"info", "/track", "", "(Toggle Drop/Collect Logs - See Them In /logs)"},
+        {"info", "/logs", "", "(World Logs: Roulette, Drop & Collect)"},
 
         // --- 1. Customize ---
         {"customize", "/flag", "[itemID]", "(Sets Country Flag To Item ID)"},
@@ -93,17 +96,30 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"customize", "/pathfind, /pf", "", "(Pathfinder Settings Page)"},
         {"customize", "/hotkeys", "", "(Configure Chat Command Hotkey Shortcuts)"},
         {"customize", "/options", "", "(Open All Selectable Feature Options Page)"},
+        {"customize", "/showoc", "", "(Show Open/Closed Doors)"},
+        {"customize", "/me", "", "(Toggle /me Effect)"},
 
         // --- 2. Main Features ---
         {"mf", "/speed", "[speed] [gravity]", "(Open Speed & Gravity Settings)"},
         {"mf", "/wrench", "", "(Select Wrench Mode: Pull/Kick/Ban)"},
-        {"mf", "/wrenchmsg", "", "(Toggle Show Wrench Chat Messages)"},
-        {"mf", "/wrenchspam", "", "(Toggle Wrench Spam Auto Mode)"},
+        {"mf", "/wrenchmsg", "", "(Wrench A Player To /msg Them Your /setmsg Text)"},
+        {"mf", "/wrenchspam", "", "(Wrench A Player To Say Your /setmsg Text)"},
+        {"mf", "/wm", "", "(Enable & Disable Wrench Mode)"},
+        {"mf", "/ws", "[mode]", "(Set Wrench Mode: pull/kick/ban)"},
+        {"mf", "/rkick", "", "(Enable & Disable Right Click Kick Mode)"},
+        {"mf", "/setmsg", "<text>", "(Set Message For /wrenchmsg & /wrenchspam)"},
         {"mf", "/spam", "", "(Toggle AutoSpam Options)"},
         {"mf", "//", "", "(Shortcut To Enable/Disable Chat Auto-Spam)"},
         {"mf", "/spamdelay", "<ms>", "(Set Auto-Spam Delay In Milliseconds)"},
         {"mf", "/automsg", "", "(Toggle Auto-Message Broadcast Bot)"},
-        {"mf", "/autopull", "", "(Toggle Auto Pull Players Who Enter World)"},
+        {"mf", "/autopull", "", "(Auto Pull Menu For New Visitors)"},
+        {"mf", "/pullauto", "", "(Toggle Auto Pull)"},
+        {"mf", "/autopulltile", "", "(Auto Pull By Selected Tiles)"},
+        {"mf", "/apt", "", "(Select Auto Pull Tiles)"},
+        {"mf", "/sapt", "", "(Show Auto Pull Tile Highlights)"},
+        {"mf", "/pulltile, /pt", "", "(Enable Auto Pull Tiles)"},
+        {"mf", "/aban, /autoban", "", "(Auto Ban Player When Joining World)"},
+        {"mf", "/auto", "", "(Auto Pull/Ban Options)"},
         {"mf", "/autosurg", "", "(Toggle AutoSurgery Options)"},
         {"mf", "/surg", "", "(Enables AutoSurgery)"},
         {"mf", "/autocrime", "", "(Toggle AutoCrime Options)"},
@@ -133,7 +149,7 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"mf", "/banall", "", "(Bans Everyone In The World Without Access)"},
         {"mf", "/pullall", "", "(Pulls Everyone In The World)"},
         {"mf", "/banfire", "", "(Toggle Auto-Ban Fire Mode For Pocket Lighter Grief)"},
-        {"mf", "/ghost", "", "(Toggle Moderator Ghost Mode - Visual Invis State)"},
+        {"mf", "/ghost", "", "(Toggle Moderator Ghost Mode - Walk Through Blocks)"},
 
         // --- 3. Auto Hoster ---
         {"casino", "/tp", "", "(Starts Autohoster Bet Sweep [Don't Move])"},
@@ -146,7 +162,9 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"casino", "/spos1, /spos2", "", "(Punch Tile To Set Pos1-2 For Autohost)"},
         {"casino", "/cpos1, /cpos2", "", "(Highlight & Check Saved Pos1-2)"},
         {"casino", "/tp1, /tp2, /tp3, /tp4", "", "(Teleport/Pathfind To Saved Pos1-4)"},
-        {"casino", "/qq", "[on/off]", "(Toggle Show QQ Number in Roulette Spin)"},
+        {"casino", "/qq, /qeme", "[on/off]", "(Toggle Show QQ Number in Roulette Spin)"},
+        {"casino", "/leme", "", "(Enable & Disable Leme Spin)"},
+        {"casino", "/gp, /gaspull", "", "(Auto Pull When Someone Says Gas/Play)"},
         {"casino", "/reme", "[on/off]", "(Toggle Show REME Spin in Roulette Spin)"},
 
         // --- 5. Economy & Drops ---
@@ -160,7 +178,10 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"econ", "/dropall", "[qty]", "(Drop Items From Inventory [All Or Quantity])"},
         {"econ", "/dpos", "", "(Set Target Drop Position Where You Stand)"},
         {"econ", "/dropat", "[amt]", "(Teleport To Saved Drop Spot & Drop Prize)"},
-        {"econ", "/balance", "", "(Shows Your Current World Lock Balance)"},
+        {"econ", "/balance, /bal", "", "(Shows Your WL / DL / BGL Balance In A Dialog)"},
+        {"econ", "/arroz, /roz", "[amount]", "(Drop Arroz Con Pollo)"},
+        {"econ", "/autobgl, /bgl", "", "(Auto Change BGL When Wrench Phone)"},
+        {"econ", "/fastbgl", "[amount]", "(Fast BGL via WL Storage)"},
 
         // --- 6. Clothes & Visual Customization ---
         {"visual", "/find", "[item name]", "(Find An Item So You Can Visually Add To Inventory)"},
@@ -175,7 +196,7 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"visual", "/cleartitle", "", "(Remove All Titles And Reset Name)"},
         {"visual", "/name", "[name]", "(Set Visual Name To Your Name)"},
         {"visual", "/skin", "<r> <g> <b>", "(Set Visual Skin Color To Yourself)"},
-        {"visual", "/weather", "[id]", "(Custom Visual Weather Select)"},
+        {"visual", "/weather", "[id]", "(Custom Weather Machine dialog)"},
         {"visual", "/vision", "", "(Visually Replace Background Blocks To Glass Pane)"},
         {"visual", "/invis", "", "(Visual Moderator Invis Mode)"},
         {"visual", "/fakeban", "", "(Visually Get Perma-Ban Notification)"},
@@ -205,8 +226,8 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"information", "/uid", "", "(Display Current Player User ID)"},
         {"information", "/scan", "", "(Toggle World Item Scan & Extract Mode)"},
         {"information", "/ping", "", "(Toggle Real-Time Ping Latency Display)"},
-        {"information", "/track", "", "(Toggle Drop Tracker Log)"},
-        {"information", "/balance", "", "(Shows Your Current World Lock Balance)"},
+        {"information", "/track", "", "(Toggle Drop/Collect Logs - See Them In /logs)"},
+        {"information", "/balance, /bal", "", "(Shows Your WL / DL / BGL Balance In A Dialog)"},
 
         // --- 8. Shortcuts ---
         {"sc", "/antigravity", "", "(Toggle Unlimited Jumping & Zero Gravity)"},
@@ -217,6 +238,9 @@ static const std::vector<CommandDoc>& get_all_commands() {
         {"sc", "/save", "", "(Warps You To A Save World)"},
         {"sc", "/setsave", "[world]", "(Set Save World)"},
         {"sc", "/relog", "", "(Fast Exit & Join Back To The World)"},
+        {"sc", "/exit", "", "(Leave The Current World)"},
+        {"sc", "/res, /respawn", "", "(Respawn Right Away)"},
+        {"sc", "/logout", "", "(Log Out & Go Back To The Growtopia Main Menu)"},
         {"sc", "/run", "", "(Panic Moderator Escape: Hops 12 Random Worlds)"},
         {"sc", "/warp", "<world>", "(Warp Directly Into Specified World)"},
         {"sc", "/vendlogs", "", "(Opens Up A Page With Proxy Saved Logs)"},
@@ -278,6 +302,9 @@ static std::string trim(const std::string& s) {
     size_t last = s.find_last_not_of(" \t\r\n");
     return s.substr(first, (last - first + 1));
 }
+
+// Extra space after the last row so it can be scrolled fully into view (see show_commands_gui)
+static constexpr int kBottomPadding = 40;
 
 static int s_current_proxy_tab = 0;
 static std::atomic<bool> s_switching_tab = false;
@@ -420,8 +447,20 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, c
 
         // dialog << "add_spacer|small|\n";
 
-        // Reserved / Testing area for Tabs 1-4 (user will customize these later)
-        if (active_tab != 0 && filter_lower.empty()) {
+        // Tab 2: Proxy Logs (same logs as /logs, with enable/disable buttons)
+        if (active_tab == 2 && filter_lower.empty()) {
+            dialog << LogsCommand::proxy_logs_tab();
+        }
+
+        // Tab 4: Options (same page as /options; checkboxes are saved with the Save Options button)
+        if (active_tab == 4 && filter_lower.empty()) {
+            dialog << OptionsCommand::options_content();
+            dialog << "add_spacer|small|\n";
+            dialog << "add_button|options_save|`2Save Options|noflags|0|0|\n";
+        }
+
+        // Reserved / Testing area for Tabs 1 and 3 (user will customize these later)
+        if ((active_tab == 1 || active_tab == 3) && filter_lower.empty()) {
             dialog << "add_spacer|small|\n";
             dialog << "add_textbox|`o[RESERVED / TESTING AREA]``|left|\n";
             dialog << "add_smalltext|`7This page is reserved for testing and custom buttons.``|\n";
@@ -454,13 +493,16 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, c
                 std::string cmd_color = c->color.empty() ? "`2" : c->color;
                 std::string arg_str = c->args.empty() ? "" : (" `9" + c->args);
                 std::string line = fmt::format("{}{}{} `9{}``", cmd_color, c->cmd, arg_str, c->desc);
+                // '|' separates dialog fields; "<start|end>" would cut the line short
+                std::replace(line.begin(), line.end(), '|', '/');
                 dialog << "add_smalltext|" << line << "|\n";
             }
         }
-
-        // Footer
-        dialog << "add_spacer|small|\n";
-        dialog << "add_smalltext|`9Click tabs above to switch pages! Auto-save enabled.``|\n";
+        // Bottom padding: the custom tab strip pushes the content down, but Growtopia sizes the
+        // scroll area without it, so the last ~100px stayed hidden. Trailing spacers are ignored,
+        // so reserve the space with a margin followed by an invisible text line.
+        dialog << fmt::format("add_custom_margin|x:0;y:{}|\n", kBottomPadding);
+        dialog << "add_custom_textbox|.|size:tiny;color:0,0,0,0|\n";
         dialog << "end_dialog|proxy_commands_gui|||\n";
         dialog << "add_quick_exit|\n";
 
@@ -485,14 +527,15 @@ void ProxyCommand::show_commands_gui(player::Player* player, core::Core* core, c
 
         target_player->send_packet(byte_stream.get_data(), 0);
 
-        spdlog::info("ProxyCommand: Tabbed GUI sent (tab={}, dialog_name=proxy_commands_gui)", active_tab);
+        spdlog::debug("ProxyCommand: Tabbed GUI sent (tab={}, dialog_name=proxy_commands_gui)", active_tab);
 
     } catch (const std::exception& e) {
         spdlog::error("ProxyCommand: Failed to send GUI: {}", e.what());
     }
 }
 
-void ProxyCommand::handle_dialog_return(player::Player* player, const std::string& button_clicked, const std::string& search_query) {
+void ProxyCommand::handle_dialog_return(player::Player* player, const std::string& button_clicked, const std::string& search_query,
+                                        const std::string& raw) {
     if (!player || !g_core_proxy) return;
 
     int new_tab = -1;
@@ -510,7 +553,7 @@ void ProxyCommand::handle_dialog_return(player::Player* player, const std::strin
 
         s_current_proxy_tab = new_tab;
 
-        spdlog::info("ProxyCommand: Tab {} clicked. Dialog closed, re-triggering /proxy in 500ms...", new_tab);
+        spdlog::debug("ProxyCommand: Tab {} clicked. Dialog closed, re-triggering /proxy in 500ms...", new_tab);
 
         // Allow the Growtopia client to cleanly finish closing all dialogs on screen
         // before re-triggering the /proxy dialog with the newly selected tab.
@@ -521,10 +564,59 @@ void ProxyCommand::handle_dialog_return(player::Player* player, const std::strin
                 auto* send_to = (server && server->get_player()) ? server->get_player() : player;
                 if (send_to && send_to->is_connected()) {
                     ProxyCommand::show_commands_gui(send_to, core, "", new_tab);
-                    spdlog::info("ProxyCommand: Automatically re-triggered /proxy for tab {}", new_tab);
+                    spdlog::debug("ProxyCommand: Automatically re-triggered /proxy for tab {}", new_tab);
                 }
             } catch (const std::exception& e) {
                 spdlog::error("ProxyCommand: Failed to re-trigger /proxy: {}", e.what());
+            }
+            s_switching_tab = false;
+        }).detach();
+        return;
+    }
+
+    // Options tab: "Save Options" applies the checkboxes and re-opens the tab,
+    // "Mod Detect Settings" opens its page (the client closes the dialog on click, so wait first)
+    if (button_clicked == "options_save" || button_clicked == "kadaryt") {
+        if (s_switching_tab.exchange(true)) return;
+        std::thread([core = g_core_proxy, player, button_clicked, raw]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            try {
+                OptionsCommand::handle_dialog(raw);
+                if (button_clicked == "options_save") {
+                    auto* server = core ? core->get_server() : nullptr;
+                    auto* send_to = (server && server->get_player()) ? server->get_player() : player;
+                    if (send_to && send_to->is_connected()) {
+                        s_current_proxy_tab = 4;
+                        ProxyCommand::show_commands_gui(send_to, core, "", 4);
+                    }
+                }
+            } catch (const std::exception& e) {
+                spdlog::error("ProxyCommand: Options tab button failed: {}", e.what());
+            }
+            s_switching_tab = false;
+        }).detach();
+        return;
+    }
+
+    // Proxy Logs tab buttons: toggles re-open the tab, others open the full /logs pages.
+    // The client closes the dialog on click, so wait like the tab switch does.
+    if (button_clicked.rfind("logs_", 0) == 0) {
+        if (s_switching_tab.exchange(true)) return;
+        std::thread([core = g_core_proxy, player, button_clicked]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            try {
+                if (LogsCommand::apply_toggle(button_clicked)) {
+                    auto* server = core ? core->get_server() : nullptr;
+                    auto* send_to = (server && server->get_player()) ? server->get_player() : player;
+                    if (send_to && send_to->is_connected()) {
+                        s_current_proxy_tab = 2;
+                        ProxyCommand::show_commands_gui(send_to, core, "", 2);
+                    }
+                } else {
+                    LogsCommand::handle_dialog("logs_menu", button_clicked, "");
+                }
+            } catch (const std::exception& e) {
+                spdlog::error("ProxyCommand: Proxy Logs button failed: {}", e.what());
             }
             s_switching_tab = false;
         }).detach();
@@ -539,7 +631,7 @@ void ProxyCommand::handle_dialog_return(player::Player* player, const std::strin
             }
             int prev_tab = s_current_proxy_tab;
             s_current_proxy_tab = 0;
-            spdlog::info("ProxyCommand: X/ESC clicked on tab {}. Backing to VinProxy tab 0...", prev_tab);
+            spdlog::debug("ProxyCommand: X/ESC clicked on tab {}. Backing to VinProxy tab 0...", prev_tab);
 
             std::thread([core = g_core_proxy, player]() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -548,7 +640,7 @@ void ProxyCommand::handle_dialog_return(player::Player* player, const std::strin
                     auto* send_to = (server && server->get_player()) ? server->get_player() : player;
                     if (send_to && send_to->is_connected()) {
                         ProxyCommand::show_commands_gui(send_to, core, "", 0);
-                        spdlog::info("ProxyCommand: Successfully backed to VinProxy tab 0 via X/ESC");
+                        spdlog::debug("ProxyCommand: Successfully backed to VinProxy tab 0 via X/ESC");
                     }
                 } catch (const std::exception& e) {
                     spdlog::error("ProxyCommand: Failed to back to tab 0: {}", e.what());
@@ -559,7 +651,7 @@ void ProxyCommand::handle_dialog_return(player::Player* player, const std::strin
         }
 
         s_current_proxy_tab = 0;
-        spdlog::info("ProxyCommand: Dialog closed via X/ESC on VinProxy tab 0");
+        spdlog::debug("ProxyCommand: Dialog closed via X/ESC on VinProxy tab 0");
         return;
     }
 

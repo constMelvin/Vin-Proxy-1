@@ -57,6 +57,7 @@ public:
     void execute(client::Client* client, const std::vector<std::string>& args) override;
     static void set_core(core::Core* core);
     static bool is_enabled();
+    static void set_enabled(bool enabled);
 private:
     static core::Core* s_core;
     static bool s_enabled;
@@ -72,6 +73,7 @@ public:
     void execute(client::Client* client, const std::vector<std::string>& args) override;
     static void set_core(core::Core* core);
     static bool is_enabled();
+    static void set_enabled(bool enabled);
 private:
     static core::Core* s_core;
     static bool s_enabled;
@@ -83,21 +85,6 @@ private:
 class AutoMsgCommand : public CommandBase {
 public:
     AutoMsgCommand();
-    std::unique_ptr<CommandBase> clone() const override;
-    void execute(client::Client* client, const std::vector<std::string>& args) override;
-    static void set_core(core::Core* core);
-    static bool is_enabled();
-private:
-    static core::Core* s_core;
-    static bool s_enabled;
-};
-
-// =============================================
-// AutoPullCommand - Toggle Auto Pull Players
-// =============================================
-class AutoPullCommand : public CommandBase {
-public:
-    AutoPullCommand();
     std::unique_ptr<CommandBase> clone() const override;
     void execute(client::Client* client, const std::vector<std::string>& args) override;
     static void set_core(core::Core* core);
@@ -297,19 +284,6 @@ private:
 class HotkeysCommand : public CommandBase {
 public:
     HotkeysCommand();
-    std::unique_ptr<CommandBase> clone() const override;
-    void execute(client::Client* client, const std::vector<std::string>& args) override;
-    static void set_core(core::Core* core);
-private:
-    static core::Core* s_core;
-};
-
-// =============================================
-// OptionsPageCommand - All Features Options Page
-// =============================================
-class OptionsPageCommand : public CommandBase {
-public:
-    OptionsPageCommand();
     std::unique_ptr<CommandBase> clone() const override;
     void execute(client::Client* client, const std::vector<std::string>& args) override;
     static void set_core(core::Core* core);

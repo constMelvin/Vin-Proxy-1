@@ -6,9 +6,9 @@
 namespace command {
 
 WarpCommand::WarpCommand() : CommandBase(
-    {"warp", "exit"},
+    {"warp"},
     {"world_name"},
-    "Warp into the world specified by world_name (/exit warps to EXIT)",
+    "Warp into the world specified by world_name",
     1
 ) {}
 
@@ -21,18 +21,6 @@ void WarpCommand::execute(client::Client* client, const std::vector<std::string>
     std::string command_name;
     if (!args.empty()) {
         command_name = args[0];
-    }
-
-    if (command_name == "exit") {
-        const std::string world_name = "EXIT";
-        send_warp_packet(client, world_name);
-
-        packet::message::Log success_msg{};
-        success_msg.msg = "`2Warping to world: `5EXIT";
-        if (client->get_player()) {
-            packet::PacketHelper::send(success_msg, *client->get_player());
-        }
-        return;
     }
 
     if (args.size() < 2) {

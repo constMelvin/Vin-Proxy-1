@@ -14,6 +14,7 @@
 #include "command_handler/dat_command.hpp"
 #include "command_handler/find_command.hpp"
 #include "command_handler/vendloc_command.hpp"
+#include "command_handler/logs_command.hpp"
 #include <fstream>
 #include <chrono>
 
@@ -105,7 +106,7 @@ private:
         bs.write_data(ext_data.data(), ext_data.size());
 
         server->get_player()->send_packet(bs.get_data(), 0);
-        spdlog::info("Sent OnTextOverlay: {}", text);
+        spdlog::debug("Sent OnTextOverlay: {}", text);
     }
 
     void handle_server_packet(const core::EventPacket& event) {
@@ -126,7 +127,7 @@ private:
             ).count();
             
             if (elapsed < 60) {  
-                spdlog::info("[PACKET-LOG] Type={} Size={} (+{}s after world load)", 
+                spdlog::debug("[PACKET-LOG] Type={} Size={} (+{}s after world load)", 
                             (int)game_packet.type, event.get_ext_data().size(), (int)elapsed);
             } else {
                 logging_enabled = false;
@@ -135,7 +136,7 @@ private:
         
         
         if (game_packet.type == packet::PACKET_ITEM_CHANGE_OBJECT) {
-            spdlog::info("[ITEM_CHANGE_OBJECT DETECTED] Size={} bytes", event.get_ext_data().size());
+            spdlog::debug("[ITEM_CHANGE_OBJECT DETECTED] Size={} bytes", event.get_ext_data().size());
         }
         
         switch (game_packet.type) {
@@ -152,14 +153,14 @@ private:
     }
 
     void handle_map_data(const core::EventPacket& event) {
-        spdlog::info("=== SEND_MAP_DATA RECEIVED ===");
+        spdlog::debug("=== SEND_MAP_DATA RECEIVED ===");
         try {
             const auto& game_packet = event.get_packet();
             const auto& ext_data = event.get_ext_data();
             
-            spdlog::info("Data size: {} bytes", ext_data.size());
-            spdlog::info("Decompressed size field: {} bytes", game_packet.decompressed_data_size);
-            spdlog::info("Packet flags.extended: {}", game_packet.flags.extended);
+            spdlog::debug("Data size: {} bytes", ext_data.size());
+            spdlog::debug("Decompressed size field: {} bytes", game_packet.decompressed_data_size);
+            spdlog::debug("Packet flags.extended: {}", game_packet.flags.extended);
             
             if (!ext_data.empty()) {
                 
@@ -194,6 +195,7 @@ private:
                     
                     
                     utils::WorldManager::get_instance().set_current_world_v2(g_parsed_world);
+                    command::LogsCommand::on_world_load();   // new world: clear /logs
                     
                     
                     command::AdminCommand::set_current_world(&g_parsed_world);

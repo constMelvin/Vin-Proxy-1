@@ -19,6 +19,8 @@
 #include "../extension/command_handler/doorid_command.hpp"
 #include "../extension/command_handler/position_command.hpp"
 #include "../extension/command_handler/extended_commands.hpp"
+#include "../extension/command_handler/onspawn_commands.hpp"
+#include "../extension/command_handler/logout_command.hpp"
 #include "../utils/items_dat_patcher.hpp"
 #include "../utils/gems_manager.hpp"
 #include "../utils/packet_utils.hpp"
@@ -259,6 +261,12 @@ void Server::on_receive(ENetPeer* peer, ENetPacket* packet)
         }
 
         TextParse text_parse{ message };
+
+        // Right after /logout the game logs in again by itself; reject that login so it
+        // goes back to the main menu (the login packet is "protocol|...\nltoken|...")
+        if (!text_parse.get("protocol").empty() && command::LogoutCommand::reject_login_after_logout()) {
+            return;
+        }
         
         
         
@@ -315,9 +323,9 @@ void Server::on_receive(ENetPeer* peer, ENetPacket* packet)
         }
         
         if (printMessages) {
-            spdlog::info("Incoming message from client:");
+            spdlog::debug("Incoming message from client:");
             for (const auto& key_value : text_parse.get_key_values()) {
-                spdlog::info("  {}", key_value);
+                spdlog::debug("  {}", key_value);
             }
         }
 
@@ -389,6 +397,21 @@ void Server::on_receive(ENetPeer* peer, ENetPacket* packet)
                     const auto* tank = reinterpret_cast<const packet::TankUpdatePacket*>(raw_bytes.data() + start_pos);
                     if (tank->int_x >= 0 && tank->int_y >= 0) {
                         command::PositionCommand::handle_punched_tile(tank->int_x, tank->int_y);
+                    }
+                }
+            }
+
+            // /apt tile selection (LuckyProxy): punching a tile adds it to the Auto Pull Tile list
+            else if (game_update_packet.type == packet::PACKET_STATE ||
+                     game_update_packet.type == packet::PACKET_TILE_CHANGE_REQUEST) {
+                const auto& raw_bytes = byte_stream.get_data();
+                if (raw_bytes.size() >= start_pos + sizeof(packet::TankUpdatePacket)) {
+                    const auto* tank = reinterpret_cast<const packet::TankUpdatePacket*>(raw_bytes.data() + start_pos);
+                    const bool is_punch =
+                        (game_update_packet.type == packet::PACKET_STATE && (tank->flags == 2592 || tank->flags == 2608)) ||
+                        (game_update_packet.type == packet::PACKET_TILE_CHANGE_REQUEST && tank->int_data == 18);
+                    if (is_punch && tank->int_x >= 0 && tank->int_y >= 0) {
+                        command::OnSpawnManager::on_tile_punched(tank->int_x, tank->int_y);
                     }
                 }
             }
@@ -494,7 +517,7 @@ void Server::on_receive(ENetPeer* peer, ENetPacket* packet)
             }
 
             if (game_update_packet.type == packet::PACKET_CALL_FUNCTION) {
-                spdlog::info("[SERVER-DEBUG] Got PACKET_CALL_FUNCTION from client, ext_data size: {}", ext_data.size());
+                spdlog::debug("[SERVER-DEBUG] Got PACKET_CALL_FUNCTION from client, ext_data size: {}", ext_data.size());
                 
                 if (!ext_data.empty()) {
                     try {
@@ -503,7 +526,7 @@ void Server::on_receive(ENetPeer* peer, ENetPacket* packet)
                             auto variants = variant.get_variants();
                             if (variants.size() >= 1) {
                                 std::string func_name = variant.get<std::string>(0);
-                                spdlog::info("[SERVER-VARIANT] Function: {}, Params: {}", func_name, variants.size());
+                                spdlog::debug("[SERVER-VARIANT] Function: {}, Params: {}", func_name, variants.size());
                                 
                                 if (func_name == "OnSendToServer" && variants.size() >= 5) {
                                     std::string server_info = variant.get<std::string>(4);

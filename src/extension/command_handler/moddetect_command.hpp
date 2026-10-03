@@ -19,7 +19,12 @@ public:
     static bool is_enabled();
     static void toggle();
 
+    // LuckyProxy "Mod Detect Settings" page (opened from /options) and the actions it enables
+    static void show_settings_dialog();
+    static void handle_settings_dialog(const std::string& raw);
+
 private:
+    static void run_mod_actions();
     static core::Core* s_core;
 };
 

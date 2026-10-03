@@ -46,6 +46,20 @@
 #include "eventmenu_command.hpp"
 #include "mailclaim_command.hpp"
 #include "weather_command.hpp"
+#include "onspawn_commands.hpp"
+#include "lucky_common.hpp"
+#include "options_command.hpp"
+#include "showoc_command.hpp"
+#include "me_command.hpp"
+#include "leme_command.hpp"
+#include "gaspull_command.hpp"
+#include "logs_command.hpp"
+#include "arroz_command.hpp"
+#include "autobgl_command.hpp"
+#include "fastbgl_command.hpp"
+#include "res_command.hpp"
+#include "exit_command.hpp"
+#include "logout_command.hpp"
 #include "clothes_command.hpp"
 #include "clearclothes_command.hpp"
 #include "clothesslot_command.hpp"
@@ -343,6 +357,10 @@ public:
         register_command(std::make_unique<command::QQCommand>());
         register_command(std::make_unique<command::RemeCommand>());
         register_command(std::make_unique<command::WrenchCommand>());
+        register_command(std::make_unique<command::WrenchModeToggleCommand>());
+        register_command(std::make_unique<command::WrenchSetModeCommand>());
+        register_command(std::make_unique<command::RightClickKickCommand>());
+        register_command(std::make_unique<command::SetMsgCommand>());
         register_command(std::make_unique<command::ModDetectCommand>());
         register_command(std::make_unique<command::LockeFindCommand>());
         register_command(std::make_unique<command::LockeTest001Command>());
@@ -369,6 +387,9 @@ public:
         register_command(std::make_unique<command::DebugAnimCommand>());
 
         register_command(std::make_unique<command::RelogCommand>());
+        register_command(std::make_unique<command::ResCommand>());
+        register_command(std::make_unique<command::ExitCommand>());
+        register_command(std::make_unique<command::LogoutCommand>());
         register_command(std::make_unique<command::SaveWorldCommand>());
         register_command(std::make_unique<command::FastDoorCommand>());
         register_command(std::make_unique<command::SPosCommand>());
@@ -385,7 +406,7 @@ public:
         command::TrackCommand::set_core(core_);
         command::GhostCommand::set_core(core_);
         command::AutoMsgCommand::set_core(core_);
-        command::AutoPullCommand::set_core(core_);
+        command::OnSpawnManager::set_core(core_);
         command::FastRecycleCommand::set_core(core_);
         command::WrenchMsgCommand::set_core(core_);
         command::WrenchSpamCommand::set_core(core_);
@@ -399,7 +420,7 @@ public:
         command::CountryListCommand::set_core(core_);
         command::WorldOptionsCommand::set_core(core_);
         command::HotkeysCommand::set_core(core_);
-        command::OptionsPageCommand::set_core(core_);
+        command::lucky::set_core(core_);
         command::DropBGLAliasCommand::set_core(core_);
 
         register_command(std::make_unique<command::ShowXYCommand>());
@@ -409,6 +430,13 @@ public:
         register_command(std::make_unique<command::GhostCommand>());
         register_command(std::make_unique<command::AutoMsgCommand>());
         register_command(std::make_unique<command::AutoPullCommand>());
+        register_command(std::make_unique<command::PullAutoCommand>());
+        register_command(std::make_unique<command::AutoPullTileCommand>());
+        register_command(std::make_unique<command::AptCommand>());
+        register_command(std::make_unique<command::SaptCommand>());
+        register_command(std::make_unique<command::PullTileCommand>());
+        register_command(std::make_unique<command::AutoBanCommand>());
+        register_command(std::make_unique<command::AutoOptionsCommand>());
         register_command(std::make_unique<command::FastRecycleCommand>());
         register_command(std::make_unique<command::WrenchMsgCommand>());
         register_command(std::make_unique<command::WrenchSpamCommand>());
@@ -422,7 +450,15 @@ public:
         register_command(std::make_unique<command::CountryListCommand>());
         register_command(std::make_unique<command::WorldOptionsCommand>());
         register_command(std::make_unique<command::HotkeysCommand>());
-        register_command(std::make_unique<command::OptionsPageCommand>());
+        register_command(std::make_unique<command::OptionsCommand>());
+        register_command(std::make_unique<command::ShowOcCommand>());
+        register_command(std::make_unique<command::MeCommand>());
+        register_command(std::make_unique<command::LemeCommand>());
+        register_command(std::make_unique<command::GasPullCommand>());
+        register_command(std::make_unique<command::LogsCommand>());
+        register_command(std::make_unique<command::ArrozCommand>());
+        register_command(std::make_unique<command::AutoBglCommand>());
+        register_command(std::make_unique<command::FastBglCommand>());
         register_command(std::make_unique<command::DropBGLAliasCommand>());
 
         spdlog::trace("Registered {} commands", commands_.size());
@@ -778,6 +814,61 @@ private:
                 event.canceled = true;
                 return;
             }
+            else if (dialog_name == "mod_settings_spare") {
+                if (button_clicked != "Cancel")
+                    command::ModDetectCommand::handle_settings_dialog(event.get_message().get_raw());
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "options_page") {
+                if (button_clicked != "Cancel")
+                    command::OptionsCommand::handle_dialog(event.get_message().get_raw());
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "logs_menu" || dialog_name.rfind("world_logs_", 0) == 0) {
+                command::LogsCommand::handle_dialog(dialog_name, button_clicked, event.get_message().get_raw());
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "balance_dialog") {
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "autopull_settings") {
+                command::OnSpawnManager::handle_autopull_dialog(button_clicked);
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "autopulltile_settings") {
+                command::OnSpawnManager::handle_autopulltile_dialog(button_clicked);
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "auto_dialog") {
+                if (button_clicked != "Cancel")
+                    command::OnSpawnManager::handle_auto_dialog(button_clicked, event.get_message().get_raw());
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "pullby_name") {
+                if (button_clicked != "Cancel")
+                    command::OnSpawnManager::handle_pullby_name_dialog(event.get_message().get_raw());
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "banby_name") {
+                if (button_clicked != "Cancel")
+                    command::OnSpawnManager::handle_banby_name_dialog(event.get_message().get_raw());
+                event.canceled = true;
+                return;
+            }
+            else if (dialog_name == "weather_page") {
+                if (button_clicked != "Cancel")
+                    command::WeatherCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), button_clicked, event.get_message().get_raw());
+                event.canceled = true;
+                return;
+            }
             else if (dialog_name == "auto_collect_page") {
                 if (button_clicked != "Cancel")
                     command::AutoCollectCommand::handle_dialog_response(const_cast<player::Player*>(&event.get_player()), event.get_message().get_raw());
@@ -830,7 +921,8 @@ private:
                 auto* server = core_->get_server();
                 if (server && server->get_player()) {
                     std::string search = text_parse.get("proxy_search");
-                    command::ProxyCommand::handle_dialog_return(server->get_player(), button_clicked, search);
+                    command::ProxyCommand::handle_dialog_return(server->get_player(), button_clicked, search,
+                                                                event.get_message().get_raw());
                 }
                 event.canceled = true;
                 return;
@@ -963,6 +1055,11 @@ private:
                         event.canceled = true;
                     }
                 }
+
+                // LuckyProxy /me: send normal chat as "/me <text>"
+                if (!event.canceled && command::MeCommand::on_chat_input(plain_text)) {
+                    event.canceled = true;
+                }
             }
         }
     }
@@ -1069,6 +1166,12 @@ private:
                 }
             }
             // Always cancel the click packet so no action leaks to server while shifting!
+            const_cast<core::EventPacket&>(event).canceled = true;
+            return;
+        }
+
+        // LuckyProxy /ghost: hold back client movement from the server while ghost mode is on
+        if (command::GhostCommand::is_enabled() && game_packet.type == packet::PACKET_STATE) {
             const_cast<core::EventPacket&>(event).canceled = true;
             return;
         }

@@ -179,8 +179,8 @@ public:
     void parse_inventory(const std::vector<std::byte>& data, const packet::GameUpdatePacket* pkt = nullptr) {
         std::lock_guard<std::mutex> lock(mutex_);
         
-        spdlog::info("=== PARSING INVENTORY ===");
-        spdlog::info("Data size: {} bytes", data.size());
+        spdlog::debug("=== PARSING INVENTORY ===");
+        spdlog::debug("Data size: {} bytes", data.size());
         
         if (data.size() < 7) {
             spdlog::warn("Inventory data too small: {} bytes", data.size());
@@ -201,7 +201,7 @@ public:
         for (size_t i = 0; i < std::min(size_t(20), data.size()); i++) {
             hex << std::hex << std::setw(2) << std::setfill('0') << (int)data[i] << " ";
         }
-        spdlog::info("First 20 bytes: {}", hex.str());
+        spdlog::debug("First 20 bytes: {}", hex.str());
         
         size_t offset = 1; 
         
@@ -213,7 +213,7 @@ public:
         uint16_t item_count = *reinterpret_cast<const uint16_t*>(&data[offset]);
         offset += 2;
         
-        spdlog::info("Inventory: size={}, items={}", inventory_size_, item_count);
+        spdlog::debug("Inventory: size={}, items={}", inventory_size_, item_count);
         
         
         items_.clear();
@@ -248,7 +248,7 @@ public:
             }
             
             if (i < 5) {  
-                spdlog::info("  Item {}: id={}, amount={}, flags={}", i, id, amount, flags);
+                spdlog::debug("  Item {}: id={}, amount={}, flags={}", i, id, amount, flags);
             }
         }
         

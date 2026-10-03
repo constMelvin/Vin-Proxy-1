@@ -443,9 +443,9 @@ int main() {
         logger.set_logger(main_logger);
         spdlog::register_logger(logger.get_logger());
         spdlog::set_default_logger(logger.get_logger());
-        
-        
-        spdlog::set_pattern("%^%v%$");
+
+        // Each sink keeps its own pattern (core/logger.hpp); the GUI log window shows the plain message
+        sinks[2]->set_pattern("%v");
 
         
         

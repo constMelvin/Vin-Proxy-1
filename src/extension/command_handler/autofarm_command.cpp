@@ -64,7 +64,7 @@ std::string AutoFarmCommand::build_dialog(bool interval_error) {
                        "Only used while Auto Collect is on. 0 = no pause, max " + std::to_string(MAX_COLLECT_WAIT_MS) + ".");
     d << "add_text_input|farminterval|`cAutoFarm Interval (ms): |" << s_interval.load() << "|5|\n";
     d << af::tiny_text("`91000ms = 1 Second");
-    d << "end_dialog|farmpage|Cancel|Okey|\n";
+    d << "end_dialog|farmpage|Cancel|Okay|\n";
     return d.str();
 }
 

@@ -36,6 +36,11 @@
 #include "../extension/command_handler/autocollect_command.hpp"
 #include "../extension/command_handler/utility_commands.hpp"
 #include "../extension/command_handler/extended_commands.hpp"
+#include "../extension/command_handler/weather_command.hpp"
+#include "../extension/command_handler/onspawn_commands.hpp"
+#include "../extension/command_handler/logs_command.hpp"
+#include "../extension/command_handler/showoc_command.hpp"
+#include "../extension/command_handler/antigravity.hpp"
 #include <cmath>
 
 namespace client {
@@ -385,9 +390,9 @@ void Client::handle_text_message(ByteStream<std::uint16_t>& byte_stream, player:
     };
 
     if (core_->get_config().get<bool>("log.printMessage")) {
-        spdlog::info("Received server message:");
+        spdlog::debug("Received server message:");
         for (const auto& key_value : text_parse.get_key_values()) {
-            spdlog::info("  {}", key_value);
+            spdlog::debug("  {}", key_value);
         }
     }
 
@@ -566,6 +571,7 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                  di.ItemId, di.Uid, di.X, di.Y, di.Amount);
 
                     command::AutoCollectCommand::notify_item_drop(vec_x, vec_y);
+                    command::LogsCommand::on_drop(target_net_id, di.ItemId, di.Amount);   // /track drop logs
 
                     if (di.ItemId == 112) {
                         auto& gm = utils::GemsManager::get_instance();
@@ -699,6 +705,10 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                 has_match_pos = true;
                             }
                         }
+                    }
+
+                    if (coll_id > 0 && coll_amount > 0) {
+                        command::LogsCommand::on_collect(pkt_net_id, coll_id, coll_amount);   // /track collect logs
                     }
 
                     if (is_local) {
@@ -841,6 +851,10 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                     command::BanallCommand::add_spawned_player(player_name);
                                 }
                                 command::ModDetectCommand::handle_spawn_packet(spawn_data);
+                                // LuckyProxy /autopull, /auto, /aban: act on players entering the world
+                                if (!player_name.empty() && net_id > 0) {
+                                    command::OnSpawnManager::on_player_spawn(net_id, player_name);
+                                }
                             }
                             
                             if (spawn_type == "local") {
@@ -961,6 +975,13 @@ void Client::handle_game_packet(ByteStream<std::uint16_t>& byte_stream, player::
                                 // LuckyProxy: Always send pathfinder state on spawn so
                                 // GT client unlocks full-screen click reach for Shift+Click.
                                 command::FindPathCommand::send_pathfinder_state(to_player, net_id);
+
+                                // LuckyProxy /weather: keep custom weather across worlds
+                                command::WeatherCommand::on_local_spawn(to_player);
+                                // LuckyProxy /showoc: colour entrances once the world is shown
+                                command::ShowOcCommand::on_local_spawn();
+                                // LuckyProxy /options Anti Gravity: re-apply in every world
+                                command::AntiGravity::on_local_spawn();
                             }
                         }
                         else if (function_name == "OnSendToServer") {

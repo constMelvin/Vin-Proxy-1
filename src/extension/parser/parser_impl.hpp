@@ -30,6 +30,22 @@
 #include "../command_handler/drop_currency_command.hpp"
 #include "../command_handler/utility_commands.hpp"  
 #include "../command_handler/proxy_command.hpp"
+#include "../command_handler/wrench_command.hpp"
+#include "../command_handler/extended_commands.hpp"
+#include "../command_handler/onspawn_commands.hpp"
+#include "../command_handler/logs_command.hpp"
+#include "../command_handler/showoc_command.hpp"
+#include "../command_handler/gaspull_command.hpp"
+#include "../command_handler/arroz_command.hpp"
+#include "../command_handler/banfire_command.hpp"
+#include "../command_handler/autoaccess.hpp"
+#include "../command_handler/fastbox.hpp"
+#include "../command_handler/hidelevel.hpp"
+#include "../command_handler/blockmsg.hpp"
+#include "../command_handler/dicespeed.hpp"
+#include "../command_handler/autobgl_command.hpp"
+#include "../command_handler/fastbgl_command.hpp"
+#include "../command_handler/logout_command.hpp"
 
 namespace extension::parser {
 
@@ -420,7 +436,7 @@ private:
                                 net_id, 
                                 player_name.empty() ? "Unknown" : player_name
                             );
-                            spdlog::info("Display settings applied successfully");
+                            spdlog::debug("Display settings applied successfully");
                         } else {
                             spdlog::info("No saved display settings to apply");
                         }
@@ -532,13 +548,26 @@ private:
                     const int abs_spin = spin < 0 ? -spin : spin;
                     const int ones = abs_spin % 10;
                     const int tens = (abs_spin / 10) % 10;
-                    const int s = tens + ones;
-                    if (s == 10) return 0;
-                    return s;
+                    return (tens + ones) % 10;   // LuckyProxy reme: digit sum, last digit
                 };
                 auto qq_digit = [](int spin) -> int {
                     const int abs_spin = spin < 0 ? -spin : spin;
                     return abs_spin % 10;
+                };
+                // LuckyProxy /leme and /qeme spin tags
+                auto leme_suffix = [&](int spin) -> std::string {
+                    if (!host_flag("features.host.show_leme_spin", false)) return {};
+                    std::string special;
+                    if (spin == 2 || spin == 9) special = " `4AUTO LOSE!`w";
+                    else if (spin == 1) special = " `2X3!`w";
+                    else if (spin == 0) special = " `5X4/5!`w";
+                    return fmt::format(" `^LEME: `w{}{}``", sum_reme(spin), special);
+                };
+                auto qq_color = [&](int spin) -> std::string {
+                    const int q = qq_digit(spin);
+                    if (q == 0) return "`2";
+                    if (q <= 5) return "`6";
+                    return "`^";
                 };
                 auto get_roulette_color_code = [](int spin) -> std::string {
                     if (spin == 0) return "`2";
@@ -817,6 +846,14 @@ private:
                     if (variant.size() >= 2) {
                         std::string message = variant.get<std::string>(1);
 
+                        // LuckyProxy hide level msg / private msg, auto access, gas pull
+                        command::AutoAccess::on_console_message(message);
+                        command::GasPullCommand::on_console_message(message);
+                        if (command::BlockMsg::should_hide(message) || command::HideLevel::should_hide(message)) {
+                            const_cast<core::EventPacket&>(event).canceled = true;
+                            return;
+                        }
+
                         // Format lock collect console messages: `6Collected: `#1 DL, `6Collected: `#10 WL, `6Collected: `#12 BGL
                         std::string clean_collect = strip_gt_codes_local(message);
                         static const std::regex collect_lock_rx(
@@ -910,6 +947,7 @@ private:
                                 if (!from_player_chat) {
                                     recent_real_spins_[spin_key] = now;
                                     recent_real_spin_values_[spin_value] = now;
+                                    command::LogsCommand::on_roulette(message);   // /logs roulette logs
                                 } else {
                                     recent_fake_spins_[spin_key] = now;
                                     recent_fake_spin_values_[spin_value] = now;
@@ -941,8 +979,9 @@ private:
                                     std::string num_color = get_roulette_color_code(spin_value);
                                     std::string bubble_base = fmt::format("{} spun the wheel and got {}{}``!", spin_name, num_color, spin_value);
                                     std::string fake_bubble = "`4[FAKE]`` " + bubble_base;
-                                    if (show_qq) fake_bubble += fmt::format(" `8QQ: `w{}``", qq_digit(spin_value));
+                                    if (show_qq) fake_bubble += fmt::format(" `8QQ: {}{}``", qq_color(spin_value), qq_digit(spin_value));
                                     if (show_reme) fake_bubble += fmt::format(" `@REME: {}{}``", get_reme_color_code(spin_value), sum_reme(spin_value));
+                                    fake_bubble += leme_suffix(spin_value);
                                     send_talkbubble_packet(spinner_netid, fake_bubble);
                                     pending_fake_override_spin_values_[spin_value] = now;
                                 } else if (!from_player_chat && instant) {
@@ -953,8 +992,9 @@ private:
                                     std::string bubble_prefix;
                                     if (show_real) bubble_prefix += "`2[REAL]`` ";
                                     std::string bubble_suffix;
-                                    if (show_qq) bubble_suffix += fmt::format(" `8QQ: `w{}``", qq_digit(spin_value));
+                                    if (show_qq) bubble_suffix += fmt::format(" `8QQ: {}{}``", qq_color(spin_value), qq_digit(spin_value));
                                     if (show_reme) bubble_suffix += fmt::format(" `@REME: {}{}``", get_reme_color_code(spin_value), sum_reme(spin_value));
+                                    bubble_suffix += leme_suffix(spin_value);
                                     
                                     std::string decorated_bubble = bubble_prefix + bubble_base + bubble_suffix;
 
@@ -1261,6 +1301,16 @@ private:
                 if (function_name == "OnTalkBubble" && variant.size() >= 3) {
                     const std::string bubble_text = variant.get<std::string>(2);
 
+                    {
+                        uint32_t bubble_netid = 0;
+                        try { bubble_netid = static_cast<uint32_t>(variant.get<int32_t>(1)); } catch (...) {}
+                        if (command::HideLevel::should_hide(bubble_text) ||
+                            command::BanFireCommand::on_talk_bubble(bubble_netid, bubble_text)) {
+                            const_cast<core::EventPacket&>(event).canceled = true;
+                            return;
+                        }
+                    }
+
                     
                     
                     
@@ -1377,8 +1427,9 @@ private:
                             prefix += "`2[REAL]`` ";
                         }
                         std::string suffix;
-                        if (show_qq) suffix += fmt::format(" `8QQ: `w{}``", qq_digit(spin_value));
+                        if (show_qq) suffix += fmt::format(" `8QQ: {}{}``", qq_color(spin_value), qq_digit(spin_value));
                         if (show_reme) suffix += fmt::format(" `@REME: {}{}``", get_reme_color_code(spin_value), sum_reme(spin_value));
+                        suffix += leme_suffix(spin_value);
                         if (!prefix.empty() || !suffix.empty()) {
                             decorated = prefix + bubble_text + suffix;
                             
@@ -1391,6 +1442,8 @@ private:
                 }
 
                 if (function_name == "OnRequestWorldSelectMenu") {
+                    command::OnSpawnManager::on_world_exit();
+                    command::LogoutCommand::on_world_select_menu();   // /logout step 2
                     auto& inv_mgr = utils::InventoryManager::get_instance();
                     int wl = 0, dl = 0, bgl = 0, total_wl = 0;
                     inv_mgr.get_balance(wl, dl, bgl, total_wl);
@@ -1464,6 +1517,20 @@ private:
                 }
                 
                 tracker.update_player_position(tank->net_id, tank->vec_x, tank->vec_y);
+                // LuckyProxy /autopulltile: pull players stepping onto a selected tile
+                command::OnSpawnManager::on_player_moved(static_cast<uint32_t>(tank->net_id), tank->vec_x, tank->vec_y);
+            }
+        }
+
+        // LuckyProxy instant dice roll + /showoc door colours
+        if (event.from == core::EventFrom::FromServer &&
+            (game_packet.type == packet::PACKET_TILE_APPLY_DAMAGE || game_packet.type == packet::PACKET_SEND_TILE_UPDATE_DATA)) {
+            const auto* tank = reinterpret_cast<const packet::TankUpdatePacket*>(&game_packet);
+            if (game_packet.type == packet::PACKET_TILE_APPLY_DAMAGE) {
+                command::DiceSpeed::on_tile_damage(*tank);
+            } else if (command::ShowOcCommand::on_tile_update(*tank, ext_data)) {
+                const_cast<core::EventPacket&>(event).canceled = true;
+                return;
             }
         }
         
@@ -1727,17 +1794,17 @@ private:
                 } catch (...) {}
             }
 
-            spdlog::info("Incoming variant from {}:", event.from == core::EventFrom::FromClient ? "client" : "server");
+            spdlog::debug("Incoming variant from {}:", event.from == core::EventFrom::FromClient ? "client" : "server");
             for (size_t i = 0; i < variants.size(); ++i) {
                 try {
                     switch (packet::Variant::get_type(variants[i])) {
                     case packet::VariantType::FLOAT:
-                        spdlog::info("val_: {}", std::get<float>(variants[i]));
+                        spdlog::debug("val_: {}", std::get<float>(variants[i]));
                         break;
                     case packet::VariantType::STRING: {
                         std::string str_val = std::get<std::string>(variants[i]);
                         if (str_val.empty()) {
-                            spdlog::info("[SERVER] (empty string)");
+                            spdlog::debug("[SERVER] (empty string)");
                             break;
                         }
 
@@ -1755,29 +1822,29 @@ private:
                             if (!text_parse.empty()) {
                                 std::vector key_values{ text_parse.get_key_values() };
                                 if (key_values.size() == 1) {
-                                    spdlog::info("[SERVER] {}", key_values[0]);
+                                    spdlog::debug("[SERVER] {}", key_values[0]);
                                     break;
                                 }
 
-                                spdlog::info("[SERVER]");
+                                spdlog::debug("[SERVER]");
                                 for (const auto& key_value : text_parse.get_key_values()) {
-                                    spdlog::info("{}", key_value);
+                                    spdlog::debug("{}", key_value);
                                 }
                                 break;
                             }
                         } catch (const std::exception& e) {
                             
-                            spdlog::info("[SERVER] {}", str_val);
+                            spdlog::debug("[SERVER] {}", str_val);
                             break;
                         }
 
-                        spdlog::info("[SERVER] {}", str_val);
+                        spdlog::debug("[SERVER] {}", str_val);
                         break;
                     }
                     case packet::VariantType::VEC2:
                         {
                             const glm::vec2 vec2{ std::get<glm::vec2>(variants[i]) };
-                            spdlog::info("[POSITION] X: {}, Y: {}", vec2.x, vec2.y);
+                            spdlog::debug("[POSITION] X: {}, Y: {}", vec2.x, vec2.y);
                             
                             
                             if (variant.size() > 0) {
@@ -1788,7 +1855,7 @@ private:
                                         bool is_local = (event.get_packet().net_id == static_cast<uint32_t>(-1) ||
                                                          (local_player.netID > 0 && event.get_packet().net_id == local_player.netID));
                                         if (is_local && command::FindPathCommand::should_suppress_onsetpos(vec2.x, vec2.y)) {
-                                            spdlog::info("[Anti-Rubberband] Suppressed parse_call_function update for local OnSetPos ({:.1f}, {:.1f})", vec2.x, vec2.y);
+                                            spdlog::debug("[Anti-Rubberband] Suppressed parse_call_function update for local OnSetPos ({:.1f}, {:.1f})", vec2.x, vec2.y);
                                             const_cast<core::EventPacket&>(event).canceled = true;
                                             return;
                                         }
@@ -1803,7 +1870,7 @@ private:
                     case packet::VariantType::VEC3:
                         {
                             const glm::vec3 vec3{ std::get<glm::vec3>(variants[i]) };
-                            spdlog::info("[VECTOR3] X: {}, Y: {}, Z: {}", vec3.x, vec3.y, vec3.z);
+                            spdlog::debug("[VECTOR3] X: {}, Y: {}, Z: {}", vec3.x, vec3.y, vec3.z);
                             
                             
                             utils::PlayerTracker::get_instance().update_player_position(
@@ -1812,13 +1879,13 @@ private:
                         }
                         break;
                     case packet::VariantType::UNSIGNED:
-                        spdlog::info("[CLIENT] {}", std::get<uint32_t>(variants[i]));
+                        spdlog::debug("[CLIENT] {}", std::get<uint32_t>(variants[i]));
                         break;
                     case packet::VariantType::SIGNED:
-                        spdlog::info("[CLIENT] {}", std::get<int32_t>(variants[i]));
+                        spdlog::debug("[CLIENT] {}", std::get<int32_t>(variants[i]));
                         break;
                     default:
-                        spdlog::info("[UNKNOWN_TYPE] index: {}", i);
+                        spdlog::debug("[UNKNOWN_TYPE] index: {}", i);
                         break;
                     }
                 } catch (const std::exception& e) {
@@ -1896,16 +1963,16 @@ private:
                                 bool has_super_supporter = false;
                                 try { has_super_supporter = core_->get_config().get<bool>("display.title.super_supporter"); } catch (...) {}
                                 
-                                spdlog::info("[OnSpawn] Auto-applying ALL display settings: name='{}', ping={}, g4g={}, maxlevel={}, dr={}, mentor={}, legend={}, super_supporter={}", 
+                                spdlog::debug("[OnSpawn] Auto-applying ALL display settings: name='{}', ping={}, g4g={}, maxlevel={}, dr={}, mentor={}, legend={}, super_supporter={}", 
                                             saved_name, show_ping, has_g4g, has_maxlevel, has_dr, has_mentor, has_legend, has_super_supporter);
                                 
                                 
                                 std::thread([this, netID, name]() {
                                     std::this_thread::sleep_for(std::chrono::milliseconds(500));
                                     if (core_) {
-                                        spdlog::info("[OnSpawn] Applying display settings now (netID: {})", netID);
+                                        spdlog::debug("[OnSpawn] Applying display settings now (netID: {})", netID);
                                         utils::DisplayManager::apply_display_name(core_, netID, name);
-                                        spdlog::info("[OnSpawn] Display settings applied successfully");
+                                        spdlog::debug("[OnSpawn] Display settings applied successfully");
                                     }
                                 }).detach();
                             }
@@ -1922,12 +1989,24 @@ private:
                 if (function_name == "OnDialogRequest" && variant.size() >= 2) {
                     try {
                         const std::string dialog_content = variant.get<std::string>(1);
+
+                        // LuckyProxy auto access / fast donation box / arroz drop dialog
+                        if (command::AutoAccess::on_dialog_request(dialog_content) ||
+                            command::ArrozCommand::on_dialog_request(dialog_content) ||
+                            command::FastBox::on_dialog_request(dialog_content) ||
+                            command::AutoBglCommand::on_dialog_request(dialog_content) ||
+                            command::FastBglCommand::on_dialog_request(dialog_content)) {
+                            const_cast<core::EventPacket&>(event).canceled = true;
+                            return;
+                        }
                         bool wrench_auto_pull = false;
                         bool wrench_auto_kick = false;
                         bool wrench_auto_ban = false;
                         try { wrench_auto_pull = core_->get_config().get<bool>("features.wrench.auto_pull"); } catch (...) {}
                         try { wrench_auto_kick = core_->get_config().get<bool>("features.wrench.auto_kick"); } catch (...) {}
                         try { wrench_auto_ban = core_->get_config().get<bool>("features.wrench.auto_ban"); } catch (...) {}
+                        // /rkick: wrenching a player kicks them (Ban mode still takes priority)
+                        if (command::RightClickKickCommand::is_enabled()) wrench_auto_kick = true;
 
                         if (dialog_content.find("end_dialog|drop_item") != std::string::npos) {
                             if (command::DropAllCommand::is_running() || command::DropAtCommand::is_running() || command::DropWLCommand::is_dropping()) {
@@ -2057,7 +2136,9 @@ private:
                                 }
                             }
 
-                            if (!player_name.empty()) {
+                            const bool is_self = target_netid ==
+                                std::to_string(utils::PlayerTracker::get_instance().get_local_netid());
+                            if (!player_name.empty() && !is_self) {
                                 std::string cmd = "/pull " + player_name + " ";
                                 if (wrench_auto_ban) cmd = "/ban " + player_name + " ";
                                 else if (wrench_auto_kick) cmd = "/kick " + player_name + " ";
@@ -2077,7 +2158,61 @@ private:
                                     }
                                 }).detach();
 
-                                spdlog::info("AutoWrench: target_netid={}, name='{}', cmd='{}'", target_netid, player_name, cmd);
+                                spdlog::info("[Wrench] Auto wrench on {} (netID {}) -> {}", player_name, target_netid, cmd);
+                                const_cast<core::EventPacket&>(event).canceled = true;
+                                return;
+                            }
+                        }
+
+                        // LuckyProxy /wrenchmsg and /wrenchspam: wrenching another player sends the /setmsg message
+                        if ((command::WrenchMsgCommand::is_enabled() || command::WrenchSpamCommand::is_enabled()) &&
+                            dialog_content.find("add_popup_name|WrenchMenu") != std::string::npos &&
+                            dialog_content.find("end_dialog|popup|") != std::string::npos) {
+                            uint32_t target_netid = 0;
+                            std::smatch netid_match;
+                            const std::regex netid_re("embed_data\\|(?:netID|netid)\\|([0-9]+)");
+                            if (std::regex_search(dialog_content, netid_match, netid_re) && netid_match.size() > 1) {
+                                try { target_netid = static_cast<uint32_t>(std::stoul(netid_match[1].str())); } catch (...) {}
+                            }
+
+                            std::string player_name;
+                            std::smatch name_match;
+                            const std::regex name_re("add_label_with_icon\\|big\\|`w([^`\\|\\(]+)");
+                            if (std::regex_search(dialog_content, name_match, name_re) && name_match.size() > 1) {
+                                player_name = name_match[1].str();
+                                while (!player_name.empty() && std::isspace(static_cast<unsigned char>(player_name.back()))) {
+                                    player_name.pop_back();
+                                }
+                            }
+
+                            const uint32_t local_netid = utils::PlayerTracker::get_instance().get_local_netid();
+                            const std::string message = command::SetMsgCommand::get_message();
+                            if (!player_name.empty() && target_netid != 0 && target_netid != local_netid) {
+                                if (message.empty()) {
+                                    spdlog::warn("[Wrench] Wrench message/spam is on but no message is set (/setmsg)");
+                                    utils::PacketUtils::send_chat_message(const_cast<player::Player*>(&event.get_player()),
+                                        "`4No message set. Use /setmsg <text> first.");
+                                } else {
+                                    std::string text;
+                                    if (command::WrenchMsgCommand::is_enabled()) {
+                                        static const char* kColors[] = { "`9", "`8", "`b", "`6", "`$", "`e", "`c", "`4", "`3", "`2", "`1", "`a" };
+                                        const char* color = kColors[std::rand() % 12];
+                                        text = "/msg " + player_name + " " + color + message;
+                                        utils::PacketUtils::send_chat_message(const_cast<player::Player*>(&event.get_player()),
+                                            "Message Send to " + player_name);
+                                    } else {
+                                        text = message;
+                                    }
+                                    spdlog::info("[Wrench] {} -> {}", command::WrenchMsgCommand::is_enabled()
+                                        ? "Wrench message to " + player_name : "Wrench spam", text);
+                                    if (core_->get_client() && core_->get_client()->get_player()) {
+                                        ByteStream<std::uint16_t> bs{};
+                                        bs.write(packet::NET_MESSAGE_GENERIC_TEXT);
+                                        bs.write("action|input\ntext|" + text, false);
+                                        bs.write(std::uint8_t{0});   // null-terminated, or the server drops the last letter
+                                        core_->get_client()->get_player()->send_packet(bs.get_data(), 0);
+                                    }
+                                }
                                 const_cast<core::EventPacket&>(event).canceled = true;
                                 return;
                             }
